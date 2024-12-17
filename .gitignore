@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Ignore these folders
+wandb/
 shared/visual_encoders/weights/*
 shared/visual_encoders/dataset/*
 shared/visual_encoders/checkpoints/*
