@@ -1,0 +1,84 @@
+{
+  "os":  "Linux-6.8.0-49-generic-x86_64-with-glibc2.39",
+  "python":  "CPython 3.12.8",
+  "startedAt":  "2024-12-17T05:35:22.059491Z",
+  "program":  "/home/raayan/projects/diffusion-policies/shared/visual_encoders/train_resnet18_ddp.py",
+  "codePath":  "shared/visual_encoders/train_resnet18_ddp.py",
+  "git":  {
+    "remote":  "https://github.com/raayandhar/diffusion-policies.git",
+    "commit":  "7986e4ef10aba5b366d8128d5bee4d8f6eba8ea1"
+  },
+  "email":  "raayan.dhar@gmail.com",
+  "root":  "/home/raayan/projects/diffusion-policies/shared/visual_encoders",
+  "host":  "uril-1",
+  "executable":  "/home/raayan/miniforge3/envs/diffpolicies/bin/python",
+  "codePathLocal":  "train_resnet18_ddp.py",
+  "cpu_count":  32,
+  "cpu_count_logical":  64,
+  "gpu":  "NVIDIA L40S",
+  "gpu_count":  8,
+  "disk":  {
+    "/":  {
+      "total":  "68652367872",
+      "used":  "22355959808"
+    }
+  },
+  "memory":  {
+    "total":  "540864331776"
+  },
+  "cpu":  {
+    "count":  32,
+    "countLogical":  64
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    },
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada"
+    }
+  ],
+  "cudaVersion":  "12.6"
+}
