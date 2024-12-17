@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Ignore weights folders
+shared/visual_encoders/weights/*
+
 # C extensions
 *.so
 
