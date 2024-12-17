@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffusion-policies"
+version = "0.1.0"
+description = "A benchmark repository for diffusion policy implementations."
+authors = [{ name = "Raayan Dhar", email = "raayandhar@g.ucla.edu" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+# TODO: Revisit and update
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
+
+# Everything below here needs to be properly set up
+[project.optional-dependencies]
+dev = ["pytest", "black", "isort", "pre-commit"]
+docs = ["sphinx", "furo"]
+
+[project.scripts]
+train-diffpolicies = "examples.train:main"
+evaluate-diffpolicies = "examples.evaluate:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shared*", "baselines*"]
+

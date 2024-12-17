@@ -73,4 +73,4 @@ class SpatialSoftArgmax(nn.Module):
         # to (B, C*2) where for every feature
         # we have the expected x and y pixel
         # locations
-        return torch.cat([x_mean, y_mean], dim=1).view(-1, c * 2)1
+        return torch.cat([x_mean, y_mean], dim=1).view(-1, c * 2)

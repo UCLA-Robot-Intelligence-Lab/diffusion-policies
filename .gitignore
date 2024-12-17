@@ -3,11 +3,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Ignore weights folders
+# Ignore these folders
 shared/visual_encoders/weights/*
+shared/visual_encoders/dataset/*
+shared/visual_encoders/checkpoints/*
 # Do not ignore gitkeep!
 !shared/visual_encoders/weights/.gitkeep
-
+!shared/visual_encoders/dataset/.gitkeep
+!shared/visual_encoders/checkpoints/.gitkeep
 # C extensions
 *.so
 
