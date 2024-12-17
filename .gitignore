@@ -5,6 +5,8 @@ __pycache__/
 
 # Ignore weights folders
 shared/visual_encoders/weights/*
+# Do not ignore gitkeep!
+!shared/visual_encoders/weights/.gitkeep
 
 # C extensions
 *.so
