@@ -285,3 +285,76 @@ class ConditionalUnet1d(nn.Module):
         returns:
             out_BSI : [ B, S, I ] Output tensor
         """
+        # Rearrange input; x : [ B S I ] -> [ B I S ] for 1d convs
+        sample_BIS = einops.rearrange(sample_BSI, "b s i -> b i s")
+
+        # 1. Process timesteps
+        timesteps = timestep_B
+        if not torch.is_tensor(timesteps):
+            # Convert scalar to tensor (requires CPU-GPU sync, prefer passing tensor)
+            timesteps = torch([timesteps], dtype=torch.long, device=sample_BIS.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample_BIS.device)
+
+        # Broadcast to batch dimensions
+        timesteps_B = timesteps(sample_BIS.shape[0])
+
+        # 2. Encode timestep and global conditioning
+        global_feat_BD = self.diffusion_step_encoder(timesteps_B)
+
+        if global_cond_BG is not None:
+            global_feat_BC = torch.cat([global_feat_BD, global_cond_BG], dim=-1)
+        else:
+            global_feat_BC = global_feat_BD
+
+        # 3. Encode local conditioning if provided
+        h_local_BOS = []  # List of local feature maps
+        if local_cond_BSL is not None:
+            local_cond_BLS = einops.rearrange(local_cond_BSL, "b s l -> b l s")
+            visual_encoder1, visual_encoder2 = self.local_cond_encoder
+
+            x_BOS = visual_encoder1(local_cond_BLS, global_feat_BC)
+            h_local_BOS.append(x_BOS)
+
+            x_BOS = visual_encoder2(local_cond_BLS, global_feat_BC)
+            h_local_BOS.append(x_BOS)
+
+        # 4. Downsampling path
+        x_BOS = sample_BIS
+        h_BOS = []
+        for idx, (visual_encoder1, visual_encoder2, downsample) in enumerate(
+            self.down_modules
+        ):
+            x_BOS = visual_encoder1(x_BOS, global_feat_BC)
+
+            # Add first local features at initial resolution
+            if idx == 0 and len(h_local_BOS) > 0:
+                x_BOS = x_BOS + h_local_BOS[0]
+
+            x_BOS = visual_encoder2(x_BOS, global_feat_BC)
+            h_BOS.append(x_BOS)
+            x_BOS = downsample(x_BOS)
+
+        # 5. Middle / bottleneck blocks
+        for mid_module in self.mid_modules:
+            x_BOS = mid_module(x_BOS, global_feat_BC)
+
+        # 6. Upsampling path
+        for idx, (visual_encoder1, visual_encoder2, upsample) in enumerate(
+            self.up_modules
+        ):
+            x_BOS = torch.cat((x_BOS, h_BOS.pop()), dim=1)
+            x_BOS = visual_encoder1(x_BOS, global_feat_BC)
+
+            if idx == (len(self.up_modules) - 1) and len(h_local_BOS) > 0:
+                x_BOS = x_BOS + h_local_BOS[1]
+
+            x_BOS = visual_encoder2(x_BOS, global_feat_BC)
+            x_BOS = upsample(x_BOS)
+
+        # 7. Final projection / convolution
+        x_BIS = self.final_conv(x_BOS)
+
+        output_BSI = einops.rearrange(x_BIS, "b i s -> b s i")
+
+        return output_BSI
