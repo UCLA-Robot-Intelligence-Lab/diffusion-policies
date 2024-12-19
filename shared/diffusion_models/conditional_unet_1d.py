@@ -87,11 +87,11 @@ class ConditionalResBlock1d(nn.Module):
         Applies conditional residual block with FiLM conditioning.
 
         args:
-            x_BSI: Input tensor [ batch_size, sequence_length, input_channels ]
-            cond_BC: Conditioning tensor [ batch_size, cond_dim ]
+            x_BSI: Input tensor [ B, S, I ]
+            cond_BC: Conditioning tensor [ B, C ]
 
         returns:
-            out_BSO: Output tensor [ batch_size, sequence_length, output_channels ]
+            out_BSO: Output tensor [ B, S, O ]
         """
         out_BSO = self.blocks[0](x_BSI)
         embed_BO1 = self.cond_encoder(cond_BC)
