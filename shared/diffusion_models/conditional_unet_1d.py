@@ -322,6 +322,7 @@ class ConditionalUnet1d(nn.Module):
         # 4. Downsampling path
         x_BOS = sample_BIS
         h_BOS = []
+        # visual_encoders are "resnets" in the original implementation, but they are just residual blocks
         for idx, (visual_encoder1, visual_encoder2, downsample) in enumerate(
             self.down_modules
         ):
