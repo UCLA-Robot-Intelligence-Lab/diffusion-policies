@@ -3,12 +3,7 @@ import torch.nn as nn
 import einops
 from typing import Union, Optional
 from einops.layers.torch import Rearrange
-from shared.components.conv1d_components import (
-    Upsample1d,
-    Downsample1d,
-    Conv1dBlock,
-    ConditionalResBlock1d,
-)
+from shared.components.conv1d_components import Upsample1d, Downsample1d, Conv1dBlock
 from shared.components.positional_embed import SinusoidalPosEmb
 
 """
@@ -22,9 +17,74 @@ C: conditioning (observation) dimension
 D: diffusion step embedding dimension
 G: global conditioning dimension
 L: local conditioning dimension
-
-Taken from Noam Shazeer's shape suffixes post on Medium
 """
+
+
+class ConditionalResBlock1d(nn.Module):
+    def __init__(
+        self,
+        inp_channels: int,
+        out_channels: int,
+        cond_dim: int,
+        kernel_size: int = 3,
+        num_groups: int = 8,
+        cond_predict_scale: bool = False,
+    ):
+        super().__init__()
+
+        self.blocks = nn.ModuleList(
+            [
+                Conv1dBlock(
+                    inp_channels=inp_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    num_groups=num_groups,
+                ),
+                Conv1dBlock(
+                    inp_channels=out_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    num_groups=num_groups,
+                ),
+            ]
+        )
+
+        # FiLM modulation
+        cond_channels = out_channels * 2 if cond_predict_scale else out_channels
+
+        self.cond_encoder = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(in_features=cond_dim, out_features=cond_channels),
+            Rearrange("b t -> b t 1"),
+        )
+
+        self.residual_conv = (
+            nn.Conv1d(
+                in_channels=inp_channels, out_channels=out_channels, kernel_size=1
+            )
+            if inp_channels != out_channels
+            else nn.Identity()
+        )
+
+        self.cond_predict_scale = cond_predict_scale
+        self.out_channels = out_channels
+
+    def forward(self, x_BSI: torch.Tensor, cond_BC: torch.Tensor) -> torch.Tensor:
+        out_BSO = self.blocks[0](x_BSI)
+        embed_BO1 = self.cond_encoder(cond_BC)
+
+        if self.cond_predict_scale:
+            embed_B2O1 = embed_BO1.reshape(embed_BO1.shape[0], 2, self.out_channels, 1)
+            scale_BO1 = embed_B2O1[:, 0, ...]
+            bias_BO1 = embed_B2O1[:, 1, ...]
+            out_BSO = scale_BO1 * out_BSO + bias_BO1
+        else:
+            out_BSO = out_BSO + embed_BO1
+
+        out_BSO = self.blocks[1](out_BSO)
+        out_BSO = out_BSO + self.residual_conv(x_BSI)
+
+        return out_BSO
 
 
 class ConditionalUnet1d(nn.Module):
@@ -43,7 +103,7 @@ class ConditionalUnet1d(nn.Module):
         all_dims = [input_dim] + list(down_dims)
         start_dim = down_dims[0]
 
-        # Diffusion step: [ B, ] -> [ B, D ]
+        # Diffusion step embedding
         dsed = diffusion_step_embed_dim
         diffusion_step_encoder = nn.Sequential(
             SinusoidalPosEmb(dim=dsed),
@@ -52,30 +112,29 @@ class ConditionalUnet1d(nn.Module):
             nn.Linear(in_features=dsed * 4, out_features=dsed),
         )
 
-        # Combined conditioning: [ B, D ] + ([ B, G ] if global_cond else [ ]) -> [ B, C ]
+        # Calculate combined conditioning dimension
         self.has_global_cond = global_cond_dim is not None
         if self.has_global_cond:
             self.global_cond_proj = nn.Sequential(
                 nn.Linear(in_features=global_cond_dim, out_features=dsed),
                 nn.Mish(),
             )
-            cond_dim = dsed * 2  # Combined dim after concat
+            cond_dim = dsed * 2  # Combined dimension after concatenation
         else:
             self.global_cond_proj = None
             cond_dim = dsed
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
 
-        # Local conditioning: [ B, S, L ] -> [ B, O, S ]
+        # Local conditioning
         self.has_local_cond = local_cond_dim is not None
         local_cond_encoder = None
         if self.has_local_cond:
             _, out_dim = in_out[0]
-            inp_dim = local_cond_dim
             local_cond_encoder = nn.ModuleList(
                 [
                     ConditionalResBlock1d(
-                        inp_channels=inp_dim,
+                        inp_channels=local_cond_dim,
                         out_channels=out_dim,
                         cond_dim=cond_dim,
                         kernel_size=kernel_size,
@@ -83,7 +142,7 @@ class ConditionalUnet1d(nn.Module):
                         cond_predict_scale=cond_predict_scale,
                     ),
                     ConditionalResBlock1d(
-                        inp_channels=inp_dim,
+                        inp_channels=local_cond_dim,
                         out_channels=out_dim,
                         cond_dim=cond_dim,
                         kernel_size=kernel_size,
@@ -93,7 +152,7 @@ class ConditionalUnet1d(nn.Module):
                 ]
             )
 
-        # Bottleneck / middle blocks: [ B, S, L ] -> [ B, O, S ]
+        # Middle blocks
         mid_dim = all_dims[-1]
         self.mid_modules = nn.ModuleList(
             [
@@ -116,7 +175,7 @@ class ConditionalUnet1d(nn.Module):
             ]
         )
 
-        # Downsampling path: [ B, I, S ] -> [B, O, S/2 ] for each step
+        # Downsampling path
         down_modules = nn.ModuleList([])
         for ind, (inp_dim, out_dim) in enumerate(in_out):
             is_last = ind >= (len(in_out) - 1)
@@ -144,7 +203,7 @@ class ConditionalUnet1d(nn.Module):
                 )
             )
 
-        # Upsampling path: [ B, O*2, S ] -> [B, I, S*2 ] for each step
+        # Upsampling path
         up_modules = nn.ModuleList([])
         for ind, (inp_dim, out_dim) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (len(in_out) - 1)
@@ -172,7 +231,7 @@ class ConditionalUnet1d(nn.Module):
                 )
             )
 
-        # Final projection: [ B, O, S ] -> [ B, I, S ]
+        # Final projection
         final_conv = nn.Sequential(
             Conv1dBlock(
                 inp_channels=start_dim, out_channels=start_dim, kernel_size=kernel_size
@@ -194,44 +253,33 @@ class ConditionalUnet1d(nn.Module):
         global_cond_BG: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        """
-        args:
-            sample_BSI : [ B, S, I ] Input tensor
-            timestep_B : [ B, ] Diffusion timestep
-            local_cond_BSL : [ B, S, L]  Local conditioning (optional)
-            global_cond_BG : [ B, G ] Global conditioning (optional)
-
-        returns:
-            out_BSI : [ B, S, I ] Output tensor
-        """
-        # Rearrange input; x : [ B S I ] -> [ B I S ] for 1d convs
+        # Rearrange input
         sample_BIS = einops.rearrange(sample_BSI, "b s i -> b i s")
 
-        # 1. Process timesteps
+        # Process timesteps
         if not torch.is_tensor(timestep_B):
             timestep_B = torch.tensor([timestep_B], device=sample_BIS.device)
         elif len(timestep_B.shape) == 0:
-            timestep_B = timestep_B[None].to(sample_BIS.device)
+            timestep_B = timestep_B[None]
 
-        # Broadcast to batch dimensions
-        timesteps_B = timestep_B.expand(sample_BIS.shape[0])
+        # Broadcast timesteps and get diffusion embedding
+        timestep_B = timestep_B.expand(sample_BIS.shape[0])
+        diff_emb = self.diffusion_step_encoder(timestep_B)
 
-        # 2. Encode timestep and global conditioning
-        global_feat_BD = self.diffusion_step_encoder(timesteps_B)
-
+        # Process global conditioning
         if self.has_global_cond:
             if global_cond_BG is None:
                 global_cond_BG = torch.zeros(
                     (sample_BIS.shape[0], self.global_cond_proj[0].in_features),
                     device=sample_BIS.device,
                 )
-            global_cond_BG = self.global_cond_proj(global_cond_BG)
-            global_feat_BC = torch.cat([global_feat_BD, global_cond_BG], dim=-1)
+            global_feat = self.global_cond_proj(global_cond_BG)
+            global_feat_BC = torch.cat([diff_emb, global_feat], dim=-1)
         else:
-            global_feat_BC = global_cond_BD
+            global_feat_BC = diff_emb
 
-        # 3. Encode local conditioning if provided
-        h_local_BOS = []  # List of local feature maps
+        # Process local conditioning
+        h_local_BOS = []
         if self.has_local_cond:
             if local_cond_BSL is None:
                 local_cond_BSL = torch.zeros(
@@ -246,48 +294,46 @@ class ConditionalUnet1d(nn.Module):
             for encoder in self.local_cond_encoder:
                 h_local_BOS.append(encoder(local_cond_BLS, global_feat_BC))
 
-        # 4. Downsampling path
+        # Downsampling
         x_BOS = sample_BIS
         h_BOS = []
-        # visual_encoders are "resnets" in the og impl, but they are just residual blocks here
         for idx, (visual_encoder1, visual_encoder2, downsample) in enumerate(
             self.down_modules
         ):
             x_BOS = visual_encoder1(x_BOS, global_feat_BC)
-
-            # Add first local features at initial resolution
             if idx == 0 and len(h_local_BOS) > 0:
                 x_BOS = x_BOS + h_local_BOS[0]
-
             x_BOS = visual_encoder2(x_BOS, global_feat_BC)
             h_BOS.append(x_BOS)
             x_BOS = downsample(x_BOS)
 
-        # 5. Middle / bottleneck blocks
+        # Middle
         for mid_module in self.mid_modules:
             x_BOS = mid_module(x_BOS, global_feat_BC)
 
-        # 6. Upsampling path
+        # Upsampling
         for idx, (visual_encoder1, visual_encoder2, upsample) in enumerate(
             self.up_modules
         ):
             x_BOS = torch.cat((x_BOS, h_BOS.pop()), dim=1)
             x_BOS = visual_encoder1(x_BOS, global_feat_BC)
-
             if idx == (len(self.up_modules)) and len(h_local_BOS) > 0:
                 x_BOS = x_BOS + h_local_BOS[1]
-
             x_BOS = visual_encoder2(x_BOS, global_feat_BC)
             x_BOS = upsample(x_BOS)
-        # 7. Final projection / convolution
+
+        # Final projection
         x_BIS = self.final_conv(x_BOS)
         output_BSI = einops.rearrange(x_BIS, "b i s -> b s i")
 
         return output_BSI
 
 
-def main():
-    # Short and easy shape testing for this model
+def test_shapes():
+    """
+    Test the shapes of tensors through the ConditionalUnet1d pipeline
+    """
+    # Test parameters
     batch_size = 4
     seq_length = 32
     input_dim = 16
@@ -295,17 +341,20 @@ def main():
     global_cond_dim = 64
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Initialize model
     model = ConditionalUnet1d(
         input_dim=input_dim,
         local_cond_dim=local_cond_dim,
         global_cond_dim=global_cond_dim,
     ).to(device)
 
+    # Create dummy inputs
     sample = torch.randn(batch_size, seq_length, input_dim).to(device)
     timestep = torch.ones(batch_size).to(device)
     local_cond = torch.randn(batch_size, seq_length, local_cond_dim).to(device)
     global_cond = torch.randn(batch_size, global_cond_dim).to(device)
 
+    # Test forward pass
     print("Testing ConditionalUnet1d shapes...")
     try:
         output = model(
@@ -315,23 +364,25 @@ def main():
             global_cond_BG=global_cond,
         )
 
+        # Verify output shape matches input shape
         assert (
             output.shape == sample.shape
         ), f"Shape mismatch: expected {sample.shape}, got {output.shape}"
 
-        print(f"Input shape: {sample.shape}")
-        print(f"Output shape: {output.shape}")
-        print("Model forward pass works with conditioning")
+        print(f"✓ Input shape: {sample.shape}")
+        print(f"✓ Output shape: {output.shape}")
+        print("✓ All shapes match!")
 
+        # Test without conditioning
         output_no_cond = model(sample_BSI=sample, timestep_B=timestep)
         assert (
             output_no_cond.shape == sample.shape
         ), "Shape mismatch with no conditioning"
-        print("Model forward pass works without conditioning")
+        print("✓ Model works without conditioning")
 
     except Exception as e:
-        print(f"Test failed: {str(e)}")
+        print(f"✗ Test failed: {str(e)}")
 
 
 if __name__ == "__main__":
-    main()
+    test_shapes()
