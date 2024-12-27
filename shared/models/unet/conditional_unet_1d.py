@@ -9,7 +9,7 @@ from shared.components.conv1d_components import (
     Conv1dBlock,
     ConditionalResBlock1d,
 )
-from shared.components.positional_embed import SinusoidalPosEmb
+from shared.components.positional_embeddings import SinusoidalPosEmb
 
 """
 Dimension key:
@@ -275,8 +275,10 @@ class ConditionalUnet1d(nn.Module):
 
             x_BOS = encoder2(x_BOS, global_feat_BC)
             x_BOS = upsample(x_BOS)
+
         # 7. Final projection / convolution
         x_BIS = self.final_conv(x_BOS)
+
         output_BSI = einops.rearrange(x_BIS, "b i s -> b s i")
 
         return output_BSI

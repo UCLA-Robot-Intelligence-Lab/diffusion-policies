@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet18 as pretrained_resnet18, ResNet18_Weights
-from spatial_softmax import SpatialSoftArgmax
+
+from shared.encoders.spatial_softmax import SpatialSoftArgmax
 
 
 class ResnetBlock(nn.Module):

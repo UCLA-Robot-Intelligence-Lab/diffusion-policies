@@ -2,7 +2,7 @@ from typing import Dict, Tuple, Union
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
-from resnet_18 import get_resnet18
+from shared.encoders.resnet_18 import get_resnet18
 
 """
 Dimension key:
