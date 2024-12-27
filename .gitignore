@@ -14,7 +14,7 @@ shared/visual_encoders/checkpoints/*
 !shared/visual_encoders/checkpoints/.gitkeep
 # C extensions
 *.so
-
+*.pth
 # Distribution / packaging
 .Python
 build/
