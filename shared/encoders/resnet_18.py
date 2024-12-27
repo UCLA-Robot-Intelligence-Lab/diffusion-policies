@@ -137,7 +137,7 @@ def get_resnet18(num_classes=1000, pretrained=False, weights_dir="./weights"):
             torch.save(weights, weights_path)
         else:
             print("Loading pretrained weights from local directory...")
-            weights = torch.load(weights_path)
+            weights = torch.load(weights_path, weights_only=True)
 
         model = pretrained_resnet18(weights=None)
         model.load_state_dict(weights)
