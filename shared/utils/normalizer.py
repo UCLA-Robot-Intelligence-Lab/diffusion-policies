@@ -4,7 +4,18 @@ from typing import Union, Dict
 
 
 class LinearNormalizer:
+    # The core functionality is from the Diffusion Policy repository
+    # I have simply re-written some of it in my own preferred way
     def __init__(self, mode="limits", output_min=-1.0, output_max=1.0, range_eps=1e-4):
+        """
+        A simple linear normalizer for scaling data to a specified range.
+
+        Args:
+            mode (str): Normalization mode, "limits" (default) or "gaussian".
+            output_min (float): Minimum value of the output range.
+            output_max (float): Maximum value of the output range.
+            range_eps (float): Small epsilon to handle zero range.
+        """
         assert mode in [
             "limits",
             "gaussian",
@@ -22,6 +33,9 @@ class LinearNormalizer:
         ],
         **kwargs,
     ):
+        """
+        Fits the normalizer parameters to the data.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 self.params[key] = self._compute_params(value, **kwargs)

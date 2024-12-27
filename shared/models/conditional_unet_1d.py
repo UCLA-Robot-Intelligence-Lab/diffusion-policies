@@ -282,8 +282,9 @@ class ConditionalUnet1d(nn.Module):
         return output_BSI
 
 
+# ====== TEST FUNCTION ======
+# The following function does some shape testing on the forward pass
 def main():
-    # Short and easy shape testing for this model
     batch_size = 4
     seq_length = 32
     input_dim = 16
