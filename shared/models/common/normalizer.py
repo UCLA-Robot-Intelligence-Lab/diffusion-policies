@@ -39,8 +39,11 @@ class LinearNormalizer:
         if isinstance(data, dict):
             for key, value in data.items():
                 self.params[key] = self._compute_params(value, **kwargs)
-        else:
-            self.params["_default"] = self._compute_params(data, **kwargs)
+            # Optionally set "_default" to one of the dictionary entries for consistency
+            if "_default" not in self.params:
+                self.params["_default"] = self.params[next(iter(data.keys()))]
+            else:
+                self.params["_default"] = self._compute_params(data, **kwargs)
 
     def normalize(
         self,

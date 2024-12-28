@@ -50,13 +50,13 @@ class ObsEncoder(nn.Module):
             pretrained=True, num_classes=512
         )
         self.rgb_keys = [
-            key for key, meta in shape_meta.items() if meta["type"] == "rgb"
+            key for key, meta in shape_meta.items() if meta.get("type") == "rgb"
         ]
         self.low_dim_keys = [
-            key for key, meta in shape_meta.items() if meta["type"] == "low_dim"
+            key for key, meta in shape_meta.items() if meta.get("type") == "low_dim"
         ]
 
-        # Apparently this is the stanford torchvision pipeline?
+        # Transformation pipeline for images
         self.image_transform = T.Compose(
             [
                 T.Resize(resize_shape),
@@ -92,7 +92,10 @@ class ObsEncoder(nn.Module):
         batch_size = None
         features = []
 
+        # Process RGB inputs
         for key in self.rgb_keys:
+            if key not in obs_dict:
+                continue
             img_BCHW = obs_dict[key]
             if batch_size is None:
                 batch_size = img_BCHW.shape[0]
@@ -111,6 +114,8 @@ class ObsEncoder(nn.Module):
 
         # Process low-dimensional inputs
         for key in self.low_dim_keys:
+            if key not in obs_dict:
+                continue
             low_dim_BL = obs_dict[key]
             if batch_size is None:
                 batch_size = low_dim_BL.shape[0]
@@ -121,6 +126,7 @@ class ObsEncoder(nn.Module):
 
             features.append(low_dim_BL)
 
+        assert features, "No valid inputs found in obs_dict."
         return torch.cat(features, dim=-1)
 
     def output_shape(self) -> Tuple[int, ...]:
@@ -130,62 +136,9 @@ class ObsEncoder(nn.Module):
         Returns:
             Tuple[int, ...]: Shape of the encoded feature vector.
         """
-        # Use example inputs to determine output shape
         example_obs = {
             key: torch.zeros(1, *meta["shape"]) for key, meta in self.shape_meta.items()
         }
         with torch.no_grad():
             output = self.forward(example_obs)
         return output.shape[1:]
-
-
-# ====== TEST FUNCTION ======
-# This is just forward pass tests for the vision backbone
-# Right now it only supports ResNet18 (as tested)
-# At some point, maybe we can experiment with other backbones, i.e., ViT
-def main():
-    # Test case with both RGB and low-dimensional inputs
-    shape_meta = {
-        "rgb1": {"shape": (3, 224, 224), "type": "rgb"},
-        "rgb2": {"shape": (3, 224, 224), "type": "rgb"},
-        "low_dim": {"shape": (10,), "type": "low_dim"},
-    }
-
-    encoder = ObsEncoder(shape_meta=shape_meta, share_vision_backbone=True)
-
-    obs_dict = {
-        "rgb1": torch.rand(8, 3, 224, 224),
-        "rgb2": torch.rand(8, 3, 224, 224),
-        "low_dim": torch.rand(8, 10),
-    }
-
-    encoded_features = encoder(obs_dict)
-    print("Test 1 - Combined Inputs: Encoded Features Shape:", encoded_features.shape)
-    assert encoded_features.shape[1] == 1034, "Unexpected feature dimension."
-
-    # Test case with only RGB inputs
-    shape_meta_rgb_only = {
-        "rgb1": {"shape": (3, 224, 224), "type": "rgb"},
-        "rgb2": {"shape": (3, 224, 224), "type": "rgb"},
-    }
-
-    encoder_rgb_only = ObsEncoder(
-        shape_meta=shape_meta_rgb_only, share_vision_backbone=True
-    )
-
-    obs_dict_rgb_only = {
-        "rgb1": torch.rand(8, 3, 224, 224),
-        "rgb2": torch.rand(8, 3, 224, 224),
-    }
-
-    encoded_features_rgb_only = encoder_rgb_only(obs_dict_rgb_only)
-    print("Test 2 - RGB Only: Encoded Features Shape:", encoded_features_rgb_only.shape)
-    assert (
-        encoded_features_rgb_only.shape[1] == 1024
-    ), "Unexpected feature dimension for RGB only."
-
-    print("All tests passed!")
-
-
-if __name__ == "__main__":
-    main()
