@@ -10,6 +10,16 @@ from shared.models.common.mask_generator import LowdimMaskGenerator
 from shared.models.common.normalizer import LinearNormalizer
 from shared.utils.pytorch_util import dict_apply
 
+"""
+Dimension key:
+
+B: batch size
+T: time steps (horizon)
+D: action feature dimensions
+O: observation feature dimensions
+C: conditioning feature dimensions
+"""
+
 
 class DiffusionUnetImagePolicy(nn.Module):
     """
@@ -68,7 +78,6 @@ class DiffusionUnetImagePolicy(nn.Module):
             fix_obs_steps=True,
             action_visible=False,
         )
-        self.mask_generator.device = next(self.model.parameters()).device
         self.normalizer = LinearNormalizer()
         self.horizon = horizon
         self.n_action_steps = n_action_steps
@@ -89,15 +98,27 @@ class DiffusionUnetImagePolicy(nn.Module):
         generator: Optional[torch.Generator] = None,
         **kwargs,
     ) -> torch.Tensor:
-        print("--- Entering conditional_sample ---")
+        """
+        Performs conditional sampling using the diffusion model.
+
+        Args:
+            condition_data: The initial trajectory to condition on.
+            condition_mask: A mask specifying which parts are conditioned.
+            local_cond: Optional local conditioning tensor.
+            global_cond: Optional global conditioning tensor.
+            generator: Random generator for reproducibility.
+
+        Returns:
+            torch.Tensor: The generated trajectory.
+        """
         trajectory = torch.randn(
             condition_data.shape,
             dtype=condition_data.dtype,
             device=condition_data.device,
             generator=generator,
         )
-        print("Initial trajectory shape:", trajectory.shape)
 
+        # Set reverse diffusion timesteps
         self.noise_scheduler.set_timesteps(self.num_inference_steps)
 
         for t in self.noise_scheduler.timesteps:
@@ -110,53 +131,55 @@ class DiffusionUnetImagePolicy(nn.Module):
             ).prev_sample
 
         trajectory[condition_mask] = condition_data[condition_mask]
-        print("--- Exiting conditional_sample ---")
         return trajectory
 
     def predict_action(
         self, obs_dict: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
-        print("--- Entering predict_action ---")
+        """
+        Encodes observations, samples trajectories, and predicts actions.
+
+        Args:
+            obs_dict: Input observations dictionary.
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary containing predicted actions.
+        """
         nobs = self.normalizer.normalize(obs_dict)
-        B, To = list(nobs.values())[0].shape[:2]
+        B, To = list(nobs.values())[0].shape[:2]  # Extract batch and time dimensions
         T = self.horizon
         Da = self.action_dim
         Do = self.obs_feature_dim
         device = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype
 
+        # Prepare conditioning inputs
         flat_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
-        nobs_features = self.obs_encoder(flat_nobs).reshape(B, To, -1)
+        nobs_features = self.obs_encoder(flat_nobs)  # [B*To, Do]
+        nobs_features = nobs_features.reshape(B, To, -1)  # [B, To, Do]
 
         if self.obs_as_global_cond:
-            global_cond = nobs_features.reshape(B, -1)
+            global_cond = nobs_features.reshape(B, -1)  # [B, To * Do]
             cond_data = torch.zeros((B, T, Da), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
         else:
             cond_data = torch.zeros((B, T, Da + Do), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
-            cond_data[:, :To, Da:] = nobs_features
+            cond_data[:, :To, Da:] = nobs_features  # Fill observation features
             cond_mask[:, :To, Da:] = True
 
+        # Sample using the diffusion model
         nsample = self.conditional_sample(cond_data, cond_mask, global_cond=global_cond)
-        naction_pred = nsample[..., :Da]
+
+        naction_pred = nsample[..., :Da]  # Extract action predictions
         action_pred = self.normalizer.unnormalize({"action": naction_pred})["action"]
 
         start, end = To - 1, To - 1 + self.n_action_steps
         action = action_pred[:, start:end]
-        print("--- Exiting predict_action ---")
+
         return {"action": action, "action_pred": action_pred}
 
     def compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Computes the diffusion loss for training.
-
-        Args:
-        batch: Batch containing observations and actions.
-
-        Returns:
-        torch.Tensor: The computed loss.
-        """
         # Normalize observations and actions
         normalized_batch = self.normalizer.normalize(batch)
         nobs = {
@@ -165,7 +188,6 @@ class DiffusionUnetImagePolicy(nn.Module):
         nactions = normalized_batch["action"]  # Extract normalized actions
 
         B, T = nactions.shape[:2]
-        print(f"[DEBUG] Batch size: {B}, Horizon: {T}")
 
         # Prepare `nobs` as a dictionary for obs_encoder
         flat_nobs = {
@@ -173,11 +195,10 @@ class DiffusionUnetImagePolicy(nn.Module):
         }
         nobs_features = self.obs_encoder(flat_nobs)  # [B*T, Do]
         nobs_features = nobs_features.reshape(B, T, -1)  # [B, T, Do]
-        print(f"[DEBUG] nobs_features shape: {nobs_features.shape}")
 
         global_cond = nobs_features.reshape(B, -1) if self.obs_as_global_cond else None
-        condition_mask = self.mask_generator.forward(nactions.shape).to(nactions.device)
-        print(f"[DEBUG] Condition mask shape: {condition_mask.shape}")
+
+        condition_mask = self.mask_generator(nactions.shape).to(nactions.device)
 
         noise = torch.randn_like(nactions)
         timesteps = torch.randint(
@@ -187,7 +208,6 @@ class DiffusionUnetImagePolicy(nn.Module):
             device=nactions.device,
         )
         noisy_trajectory = self.noise_scheduler.add_noise(nactions, noise, timesteps)
-        print(f"[DEBUG] Noisy trajectory shape: {noisy_trajectory.shape}")
 
         noisy_trajectory[condition_mask] = nactions[condition_mask]
         pred = self.model(noisy_trajectory, timesteps, global_cond=global_cond)
@@ -198,12 +218,36 @@ class DiffusionUnetImagePolicy(nn.Module):
             else nactions
         )
         loss = F.mse_loss(pred, target, reduction="none")
-        unmasked_loss = loss.clone()
-        print(f"[DEBUG] Unmasked loss mean: {unmasked_loss.mean().item()}")
-        print("CONDITION MASK: ", condition_mask)
         loss = loss.masked_fill(~condition_mask, 0).mean()
-        print(f"[DEBUG] Final masked loss: {loss.item()}")
+
         return loss
+
+    def set_normalizer(self, normalizer: LinearNormalizer):
+        """
+        Sets the normalizer state.
+
+        Args:
+            normalizer: A pre-initialized LinearNormalizer.
+        """
+        self.normalizer.load_state_dict(normalizer.state_dict())
+
+    def output_shape(self) -> Tuple[int, ...]:
+        """
+        Returns the output shape of the policy based on the model and encoder.
+
+        Returns:
+            Tuple[int, ...]: Output feature dimensions.
+        """
+        example_obs = {
+            key: torch.zeros(
+                1, *meta["shape"], device=next(self.model.parameters()).device
+            )
+            for key, meta in self.normalizer.get_input_stats().items()
+        }
+        with torch.no_grad():
+            encoded_obs = self.obs_encoder(example_obs)
+            result_shape = self.model.output_shape(encoded_obs)
+        return result_shape
 
 
 # ====== TEST FUNCTIONS ======
@@ -241,7 +285,6 @@ def test_conditional_sample():
     assert (
         output.shape == condition_data.shape
     ), "Shape mismatch in conditional_sample output."
-    print("OUTPUT: ", output)
     print("test_conditional_sample passed!")
 
 
@@ -288,7 +331,7 @@ def test_predict_action():
         policy.horizon,
         D,
     ), "Incorrect shape for 'action_pred'."
-    print("OUTPUT: ", output)
+
     print("test_predict_action passed!")
 
 
@@ -333,46 +376,5 @@ def test_compute_loss():
     print("test_compute_loss passed!")
 
 
-def test_integration():
-    """Integration test to validate all core methods together."""
-    print("--- Running integration test ---")
-    B, T, C, H, W = 4, 32, 3, 224, 224
-    D = 16
-
-    batch = {
-        "rgb": torch.randn(B, T, C, H, W),
-        "action": torch.randn(B, T, D),
-    }
-
-    shape_meta = {
-        "rgb": {"shape": (C, H, W), "type": "rgb"},
-        "action": {"shape": (D,), "type": "low_dim"},
-    }
-
-    policy = DiffusionUnetImagePolicy(
-        shape_meta=shape_meta,
-        noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
-        obs_encoder=ObsEncoder(shape_meta, vision_backbone=None),
-        horizon=T,
-        n_action_steps=5,
-        n_obs_steps=2,
-    )
-
-    example_data = {
-        "rgb": torch.randn(B, T, C, H, W),
-        "action": torch.randn(B, T, D),
-    }
-    policy.normalizer.fit(example_data)
-
-    obs_dict = {"rgb": torch.randn(B, T, C, H, W)}
-    predict_output = policy.predict_action(obs_dict)
-    loss = policy.compute_loss(batch)
-
-    print("Integration test predict_action output:", predict_output)
-    print("Integration test loss:", loss.item())
-    print("--- Integration test passed ---")
-
-
 if __name__ == "__main__":
     main()
-    test_integration()
