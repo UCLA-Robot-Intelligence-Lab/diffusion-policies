@@ -146,7 +146,7 @@ class TrainDiffusionUnetImagePolicy:
                 print(f"Resuming from checkpoint {last_ckpt}")
                 self.load_checkpoint(path=last_ckpt)
 
-        # MISSING: is this expected?
+        # WARNING: I am not using the BaseImageDataset!
         train_dataset = hydra.utils.instantiate(self.cfg.task.dataset)
         train_dataloader = DataLoader(train_dataset, **self.cfg.dataloader)
 
@@ -174,7 +174,10 @@ class TrainDiffusionUnetImagePolicy:
         if self.cfg.training.use_ema:
             ema_obj = hydra.utils.instantiate(self.cfg.ema, model=self.ema_model)
 
-        # MISSING: configure env
+        # WARNING: I am not using the BaseImageRunner!
+        env_runner = hydra.utils.instantiate(
+            cfg.task.env_runner, output_dir=self.output_dir
+        )
 
         wandb_run = wandb.init(
             dir=str(self.output_dir),
@@ -207,10 +210,12 @@ class TrainDiffusionUnetImagePolicy:
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         train_sampling_batch = None
 
+        # -- TRAINING LOOP --
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(self.cfg.training.num_epochs):
                 step_log = dict()
 
+                # ========= Train for this epoch ==========
                 if self.cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
@@ -223,17 +228,19 @@ class TrainDiffusionUnetImagePolicy:
                     train_dataloader, desc=loader_desc, leave=False
                 ) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
+                        # Device transfer
                         batch = dict_apply(
                             batch, lambda x: x.to(device, non_blocking=True)
                         )
-
                         if train_sampling_batch is None:
                             train_sampling_batch = copy.deepcopy(batch)
 
+                        # Compute loss
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / self.cfg.training.gradient_accumulate_every
                         loss.backward()
 
+                        # Step optimizer
                         if (
                             self.global_step
                             % self.cfg.training.gradient_accumulate_every
@@ -243,13 +250,14 @@ class TrainDiffusionUnetImagePolicy:
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
 
+                        # Update EMA
                         if ema_obj is not None:
                             ema_obj.step(self.model)
 
+                        # Logging
                         raw_loss_val = raw_loss.item()
                         train_losses.append(raw_loss_val)
                         tepoch.set_postfix(loss=raw_loss_val, refresh=False)
-
                         step_log = {
                             "train_loss": raw_loss_val,
                             "global_step": self.global_step,
@@ -259,6 +267,7 @@ class TrainDiffusionUnetImagePolicy:
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
                         if not is_last_batch:
+                            # Log of last step is combined with validation and rollout
                             wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
@@ -270,14 +279,21 @@ class TrainDiffusionUnetImagePolicy:
                         ):
                             break
 
+                # At the end of each epoch, replace train_loss with the epoch average
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
+                # ========= Eval for this epoch ==========
                 if self.ema_model is not None:
                     policy = self.ema_model
                 else:
                     policy = self.model
                 policy.eval()
+
+                # Run rollout
+                if (self.epoch % cfg.training.rollout_every) == 0:
+                    runner_log = env_runner.run(policy)
+                    step_log.update(runner_log)
 
                 # -- VALIDATION --
                 if (self.epoch % self.cfg.training.val_every) == 0:
@@ -336,11 +352,16 @@ class TrainDiffusionUnetImagePolicy:
                     if topk_path is not None:
                         self.save_checkpoint(path=topk_path)
 
+                # ========= Eval end for this epoch ==========
+                policy.train()
+
+                # End of epoch, log of last step is combined with validation and rollout
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
 
                 self.global_step += 1
                 self.epoch += 1
+                # May the gradients flow :)
 
 
 @hydra.main(
@@ -349,9 +370,7 @@ class TrainDiffusionUnetImagePolicy:
     config_name=pathlib.Path(__file__).stem,
 )
 def main(cfg):
-    """
-    Hydra entry point. Instantiates and runs the training process.
-    """
+    # Hydra entry point. Instantiates and runs the training process.
     trainer = TrainDiffusionUnetImagePolicy(cfg)
     trainer.run()
 

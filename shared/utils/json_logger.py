@@ -1,7 +1,7 @@
 """
 This is taken from the Diffusion Policy authors implementation:
 https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/common/json_logger.py
-All credit goes to them
+All credit goes to them.
 """
 
 from typing import Optional, Callable, Any, Sequence
