@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from typing import Dict, Tuple, Optional
 
-from shared.encoders.obs_encoder import ObsEncoder
+from shared.encoders.common.obs_encoder import ObsEncoder
 from shared.models.unet.conditional_unet_1d import ConditionalUnet1d
 from shared.models.common.mask_generator import LowdimMaskGenerator
 from shared.models.common.normalizer import LinearNormalizer
@@ -259,7 +259,7 @@ def test_conditional_sample():
     policy = DiffusionUnetImagePolicy(
         shape_meta=shape_meta,
         noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
-        obs_encoder=ObsEncoder(shape_meta, vision_backbone=None),
+        obs_encoder=ObsEncoder(shape_meta, vision_backbone=None, crop_shape=(84, 84)),
         horizon=T,
         num_action_steps=5,
         num_obs_steps=2,
@@ -312,7 +312,6 @@ def test_predict_action():
         policy.horizon,
         D,
     ), "Incorrect shape for 'action_pred'."
-    print("OUTPUT: ", output)
     print("test_predict_action passed!")
 
 

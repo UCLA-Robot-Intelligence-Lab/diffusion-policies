@@ -4,12 +4,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from torch.utils.data import DataLoader
 import wandb
+
+from torch.utils.data import DataLoader
 from dataclasses import dataclass
 from tqdm import tqdm
-
-from shared.visual_encoders.resnet_18 import get_resnet18
+from shared.encoders.resnet.resnet_18 import get_resnet18
 
 
 @dataclass

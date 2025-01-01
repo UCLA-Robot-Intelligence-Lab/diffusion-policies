@@ -1,5 +1,6 @@
-from typing import Sequence, Optional
 import torch
+
+from typing import Sequence, Optional
 from torch import nn
 
 

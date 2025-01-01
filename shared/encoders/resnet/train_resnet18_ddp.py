@@ -4,14 +4,14 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from torch.utils.data import DataLoader, DistributedSampler
 import wandb
-from dataclasses import dataclass
-from tqdm import tqdm
 import torch.multiprocessing as mp
 import torch.distributed as dist
 
-from shared.visual_encoders.resnet_18 import get_resnet18
+from torch.utils.data import DataLoader, DistributedSampler
+from dataclasses import dataclass
+from tqdm import tqdm
+from shared.encoders.resnet import get_resnet18
 
 
 @dataclass
@@ -49,7 +49,7 @@ def train_one_epoch(
 
         optimizer.zero_grad()
 
-        with torch.amp.autocast('cuda'):
+        with torch.amp.autocast("cuda"):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
 
@@ -107,7 +107,9 @@ def validate(model, dataloader, criterion, device, rank, world_size):
 
             _, pred_top5 = outputs.topk(5, 1, True, True)
             pred_top5 = pred_top5.t()
-            correct_top5 += pred_top5.eq(targets.view(1, -1).expand_as(pred_top5)).sum().item()
+            correct_top5 += (
+                pred_top5.eq(targets.view(1, -1).expand_as(pred_top5)).sum().item()
+            )
 
     total_loss_tensor = torch.tensor(total_loss).to(device)
     correct_tensor = torch.tensor(correct).to(device)
@@ -164,7 +166,9 @@ def main_worker(rank, world_size, config):
         [
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            transforms.ColorJitter(
+                brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1
+            ),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
@@ -222,7 +226,9 @@ def main_worker(rank, world_size, config):
         momentum=config.momentum,
         weight_decay=config.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.num_epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config.num_epochs
+    )
     criterion = nn.CrossEntropyLoss().to(device)
     scaler = torch.amp.GradScaler()
 

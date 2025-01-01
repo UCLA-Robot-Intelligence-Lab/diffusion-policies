@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import einops
+
 from typing import Union, Optional
 from einops.layers.torch import Rearrange
 from shared.components.conv1d_components import (

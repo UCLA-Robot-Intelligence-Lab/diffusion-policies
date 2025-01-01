@@ -1,9 +1,10 @@
-from typing import Dict, Tuple, Union
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
-from shared.encoders.resnet_18 import get_resnet18
-from shared.encoders.crop_randomizer import CropRandomizer
+
+from shared.encoders.resnet.resnet_18 import get_resnet18
+from shared.encoders.common.crop_randomizer import CropRandomizer
+from typing import Dict, Tuple, Union
 
 """
 
@@ -31,7 +32,7 @@ class ObsEncoder(nn.Module):
         vision_backbone: nn.Module = None,
         resize_shape: Tuple[int, int] = (224, 224),
         random_crop: bool = True,
-        crop_shape: Tuple[int, int] = None,
+        crop_shape: Tuple[int, int] = (84, 84),
         imagenet_norm: bool = True,
         share_vision_backbone: bool = True,
     ):
