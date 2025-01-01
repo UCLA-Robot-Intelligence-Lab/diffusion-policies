@@ -127,7 +127,9 @@ def replace_bn_with_gn(model):
             replace_bn_with_gn(child)
 
 
-def get_resnet18(num_classes=1000, pretrained=False, weights_dir="./weights"):
+def get_resnet18(num_classes=1000, pretrained=True):
+    encoders_dir = os.path.dirname(os.path.abspath(__file__))
+    weights_dir = os.path.join(encoders_dir, "weights")
     os.makedirs(weights_dir, exist_ok=True)
 
     if pretrained:
@@ -181,9 +183,9 @@ if __name__ == "__main__":
     dummy_input = torch.randn(2, 3, 224, 224)
     output = model(dummy_input)
 
-    print("Output shape:", output.shape)  # Should be (2, 10)
+    print("Output shape:", output.shape, "expecting (2, 10)")
 
     pretrained_model = get_resnet18(num_classes=10, pretrained=True)
     pretrained_model.eval()
     output_pretrained = pretrained_model(dummy_input)
-    print("Pretrained Output shape:", output_pretrained.shape)  # Should be (2, 10)
+    print("Pretrained Output shape:", output_pretrained.shape, " expecting (2, 10)")

@@ -17,10 +17,9 @@ IMPORTANT:
           - Add crop randomization and make it easy to create a pipeline
 - JAXtyping, type annotations, type hints, assertions, documentation
   (params and args) for every important function, etc
-- Check what dimensions work for the unet, maybe re-write so it can
+- Check what dimensions work for the unet, maybe re-write so it can accept (relatively) arbitrary dimensions
 - Test local_cond_dim on image policy
 
-accept (relatively) arbitrary dimensions
 (from readme)
 TODO:
 - clean up and update the visual encoders section

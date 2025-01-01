@@ -47,8 +47,8 @@ class ObsEncoder(nn.Module):
 
         # Initialize vision backbone
         self.vision_backbone = vision_backbone or get_resnet18(
-            pretrained=True, num_classes=512
-        )
+            num_classes=1000, pretrained=True
+        )  # TODO: Check if 512/1000 classes is correct? Does it matter?
         self.rgb_keys = [
             key for key, meta in shape_meta.items() if meta.get("type") == "rgb"
         ]
