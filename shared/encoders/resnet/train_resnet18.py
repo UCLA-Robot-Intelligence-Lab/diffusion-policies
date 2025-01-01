@@ -85,7 +85,7 @@ def validate(model, dataloader, criterion, device):
 def main():
     # Should be doing something better
     wandb.init(project="resnet18-imagenet", config=Config.__dict__)
-    device = torch.device("cuda" if torch.cuda.is_available())
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     transform_train = transforms.Compose(
         [
             transforms.RandomResizedCrop(224),
@@ -125,9 +125,9 @@ def main():
         pin_memory=True,
     )
 
-    model = get_resnet18(num_classes=Config.num_classes, pretrained=Config.pretrained).to(
-        device
-    )
+    model = get_resnet18(
+        num_classes=Config.num_classes, pretrained=Config.pretrained
+    ).to(device)
 
     optimizer = optim.SGD(
         model.parameters(),

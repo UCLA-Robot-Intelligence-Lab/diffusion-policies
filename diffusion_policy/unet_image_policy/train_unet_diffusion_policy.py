@@ -35,7 +35,7 @@ from shared.models.common.lr_scheduler import get_scheduler
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
-class TrainDiffusionUnetImagePolicy:
+class TrainUnetImageDiffusionPolicy:
     def __init__(self, cfg: OmegaConf, output_dir: str = None):
         """
         Initialize the training class with:

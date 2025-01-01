@@ -23,7 +23,7 @@ C: conditioning feature dimensions
 """
 
 
-class DiffusionUnetImagePolicy(nn.Module):
+class UnetImageDiffusionPolicy(nn.Module):
     def __init__(
         self,
         shape_meta: Dict[str, Dict[str, Tuple[int, ...]]],
