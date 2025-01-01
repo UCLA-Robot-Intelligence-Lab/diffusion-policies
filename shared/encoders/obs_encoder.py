@@ -3,8 +3,10 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as T
 from shared.encoders.resnet_18 import get_resnet18
+from shared.encoders.crop_randomizer import CropRandomizer
 
 """
+
 Dimension key:
 
 B: batch size
@@ -28,6 +30,8 @@ class ObsEncoder(nn.Module):
         shape_meta: Dict[str, Dict[str, Tuple[int, ...]]],
         vision_backbone: nn.Module = None,
         resize_shape: Tuple[int, int] = (224, 224),
+        random_crop: bool = True,
+        crop_shape: Tuple[int, int] = None,
         imagenet_norm: bool = True,
         share_vision_backbone: bool = True,
     ):
@@ -36,6 +40,8 @@ class ObsEncoder(nn.Module):
             shape_meta: Metadata describing input observation shapes and types.
             vision_backbone: Pretrained vision model (e.g., ResNet). Defaults to ResNet18.
             resize_shape: Tuple specifying height and width for image resizing.
+            random_crop: If True, we apply random crops to our input observations
+            crop_shape: Tuple specifying height and width for crop sizing
             imagenet_norm: If True, applies ImageNet normalization to RGB inputs.
             share_vision_backbone: If True, all RGB inputs share the same vision model.
         """
@@ -56,10 +62,19 @@ class ObsEncoder(nn.Module):
             key for key, meta in shape_meta.items() if meta.get("type") == "low_dim"
         ]
 
+        crop_randomizer = CropRandomizer(
+            input_shape=(3, *resize_shape),
+            crop_height=crop_shape[0],
+            crop_width=crop_shape[1],
+            num_crops=1,
+            pos_enc=False,
+        )
+
         # Transformation pipeline for images
         self.image_transform = T.Compose(
             [
                 T.Resize(resize_shape),
+                (crop_randomizer if random_crop else nn.Identity()),
                 (
                     T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                     if imagenet_norm
@@ -72,7 +87,7 @@ class ObsEncoder(nn.Module):
         if not share_vision_backbone:
             self.key_model_map = nn.ModuleDict(
                 {
-                    key: get_resnet18(pretrained=True, num_classes=512)
+                    key: get_resnet18(pretrained=True, num_classes=1000)
                     for key in self.rgb_keys
                 }
             )
@@ -142,3 +157,39 @@ class ObsEncoder(nn.Module):
         with torch.no_grad():
             output = self.forward(example_obs)
         return output.shape[1:]
+
+
+def test_obs_encoder():
+    B, C, H, W = 4, 3, 256, 256
+    D = 10
+    crop_height, crop_width = 112, 112
+    shape_meta = {
+        "rgb": {"shape": (C, H, W), "type": "rgb"},
+        "low_dim": {"shape": (D,), "type": "low_dim"},
+    }
+
+    obs_dict = {
+        "rgb": torch.randn(B, C, H, W),
+        "low_dim": torch.randn(B, D),
+    }
+
+    encoder = ObsEncoder(
+        shape_meta=shape_meta,
+        vision_backbone=None,
+        resize_shape=(224, 224),
+        random_crop=True,
+        crop_shape=(crop_height, crop_width),
+        imagenet_norm=True,
+    )
+
+    output = encoder(obs_dict)
+
+    assert isinstance(output, torch.Tensor), "Output is not a torch.Tensor."
+    assert output.shape[0] == B, "Output batch size mismatch."
+    print("Output shape:", output.shape)
+
+    print("test_obs_encoder passed!")
+
+
+if __name__ == "__main__":
+    test_obs_encoder()

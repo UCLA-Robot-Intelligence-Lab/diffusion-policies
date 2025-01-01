@@ -11,6 +11,7 @@ from shared.models.common.normalizer import LinearNormalizer
 from shared.utils.pytorch_util import dict_apply
 
 """
+
 Dimension key:
 
 B: batch size
@@ -18,6 +19,7 @@ T: time steps (horizon)
 D: action feature dimensions
 O: observation feature dimensions
 C: conditioning feature dimensions
+
 """
 
 
