@@ -26,18 +26,23 @@ def get_range_normalizer_from_stat(stat, output_max=1, output_min=-1, range_eps=
     )
 
 
+# This was updated; double check that this works as expected
 def get_image_range_normalizer():
-    scale = np.array([2], dtype=np.float32)
-    offset = np.array([-1], dtype=np.float32)
+    scale = torch.tensor([2], dtype=torch.float32)
+    offset = torch.tensor([-1], dtype=torch.float32)
     stat = {
-        "min": np.array([0], dtype=np.float32),
-        "max": np.array([1], dtype=np.float32),
-        "mean": np.array([0.5], dtype=np.float32),
-        "std": np.array([np.sqrt(1 / 12)], dtype=np.float32),
+        "min": torch.tensor([0], dtype=torch.float32),
+        "max": torch.tensor([1], dtype=torch.float32),
+        "mean": torch.tensor([0.5], dtype=torch.float32),
+        "std": torch.tensor([np.sqrt(1 / 12)], dtype=torch.float32),
     }
-    return SingleFieldLinearNormalizer.create_manual(
-        scale=scale, offset=offset, input_stats_dict=stat
-    )
+    normalizer = SingleFieldLinearNormalizer(mode="limits")  # Mode doesn't matter here
+    normalizer.params = {
+        "scale": scale,
+        "offset": offset,
+        "input_stats": stat,
+    }
+    return normalizer
 
 
 def get_identity_normalizer_from_stat(stat):
