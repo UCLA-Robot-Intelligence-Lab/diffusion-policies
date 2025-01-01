@@ -19,6 +19,8 @@ IMPORTANT:
   (params and args) for every important function, etc
 - Check what dimensions work for the unet, maybe re-write so it can accept (relatively) arbitrary dimensions
 - Test local_cond_dim on image policy
+- Make sure to credit code properly. For the code you credit, review
+  what's needed and potentially minimize.
 
 (from readme)
 TODO:
