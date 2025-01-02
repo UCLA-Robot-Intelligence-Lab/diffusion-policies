@@ -1,4 +1,5 @@
 import torch
+import os
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -39,7 +40,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         kernel_size: int = 5,
         n_groups: int = 8,
         cond_predict_scale: bool = True,
-        **kwargs,  # keyword arguments passed to .step, used in conditional_sample
+        **kwargs,
     ):
         super().__init__()
 
@@ -47,6 +48,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         assert len(action_shape) == 1, "Action shape must be 1-dimensional."
 
         self.action_dim = action_shape[0]
+
         self.obs_feature_dim = obs_encoder.output_shape()[0]
 
         input_dim = self.action_dim + self.obs_feature_dim
@@ -82,10 +84,17 @@ class UnetImageDiffusionPolicy(nn.Module):
         self.num_obs_steps = num_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
         self.kwargs = kwargs
-
+        self.dtype = next(self.parameters()).dtype
         self.num_inference_steps = (
             num_inference_steps or noise_scheduler.config.num_train_timesteps
         )
+
+    @property
+    def device(self):
+        """
+        Returns the device where the model is currently loaded.
+        """
+        return next(self.model.parameters()).device
 
     # ====== INFERENCE ======
     def conditional_sample(
@@ -95,7 +104,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         local_cond_BTC: Optional[torch.Tensor] = None,
         global_cond_BC: Optional[torch.Tensor] = None,
         generator: Optional[torch.Generator] = None,
-        **kwargs,
+        **kwargs,  # keyword arguments passed to .step
     ) -> torch.Tensor:
         # TODO: Update with dimension keys
         trajectory = torch.randn(
@@ -131,6 +140,7 @@ class UnetImageDiffusionPolicy(nn.Module):
     ) -> Dict[str, torch.Tensor]:
 
         num_obs = self.normalizer.normalize(obs_dict)
+
         B, To = list(num_obs.values())[0].shape[:2]
         T = self.horizon
         Da = self.action_dim
@@ -139,6 +149,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         dtype = next(self.model.parameters()).dtype
 
         flat_num_obs = dict_apply(num_obs, lambda x: x.reshape(-1, *x.shape[2:]))
+
         num_obs_features = self.obs_encoder(flat_num_obs).reshape(B, To, -1)
 
         if self.obs_as_global_cond:
@@ -163,11 +174,16 @@ class UnetImageDiffusionPolicy(nn.Module):
         return {"action": action, "action_pred": action_pred}
 
     def compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
         normalized_batch = self.normalizer.normalize(batch)
         num_obs = {
             key: normalized_batch[key] for key in self.obs_encoder.rgb_keys
         }  # Extract image data
         nactions = normalized_batch["action"]  # Extract normalized actions
+        """
+        # should be normalized obs not num_obs
+        num_obs = self.normalizer.normalize(batch["obs"])
+        nactions = self.normalizer["action"].normalize(batch["action"])
 
         B, T = nactions.shape[:2]
 
@@ -175,7 +191,9 @@ class UnetImageDiffusionPolicy(nn.Module):
         flat_num_obs = {
             key: value.reshape(-1, *value.shape[2:]) for key, value in num_obs.items()
         }
+
         num_obs_features = self.obs_encoder(flat_num_obs)
+
         num_obs_features = num_obs_features.reshape(B, T, -1)
 
         global_cond_BC = (
@@ -215,6 +233,8 @@ class UnetImageDiffusionPolicy(nn.Module):
             normalizer: A pre-initialized LinearNormalizer.
         """
         self.normalizer.load_state_dict(normalizer.state_dict())
+        print("normalizer state dict(): ", normalizer.state_dict())
+        print("normalizer param dict: ", self.normalizer.get_params())
 
     def output_shape(self) -> Tuple[int, ...]:
         """
@@ -233,6 +253,10 @@ class UnetImageDiffusionPolicy(nn.Module):
             encoded_obs = self.obs_encoder(example_obs)
             result_shape = self.model.output_shape(encoded_obs)
         return result_shape
+
+    def reset(self):
+        # only used for stateful policies
+        pass
 
 
 # ====== TEST FUNCTIONS ======
@@ -253,10 +277,13 @@ def test_conditional_sample():
 
     shape_meta = {
         "action": {"shape": (D,), "type": "low_dim"},  # Action metadata
-        "obs": {"shape": (C, H, W), "type": "rgb"},  # Image metadata
+        "obs": {
+            "image": {"shape": (C, H, W), "type": "rgb"},
+            "agent_pos": {"shape": (D,), "type": "low_dim"},
+        },
     }
 
-    policy = DiffusionUnetImagePolicy(
+    policy = UnetImageDiffusionPolicy(
         shape_meta=shape_meta,
         noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
         obs_encoder=ObsEncoder(shape_meta, vision_backbone=None, crop_shape=(84, 84)),
@@ -274,20 +301,41 @@ def test_conditional_sample():
 
 
 def test_predict_action():
+
+    from shared.datasets.pusht_image_dataset import PushTImageDataset
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    os.chdir(project_root)
+
+    print(os.path.expanduser("data/pusht/pusht_cchi_v7_replay.zarr"))
+    print("Current working directory:", os.getcwd())
+
+    dataset = PushTImageDataset("data/pusht/pusht_cchi_v7_replay.zarr")
+    dataset_normalizer = dataset.get_normalizer()
+    print("Type of dataset_normalizer:", type(dataset_normalizer))
+    print("State dict of dataset_normalizer:", dataset_normalizer.state_dict())
+    print("dataset normalizer get params: ", dataset_normalizer.get_params())
+
     B, To, C, H, W = 4, 12, 3, 224, 224
     D = 16
     Ta = 4
+    T = To + Ta
 
     obs_dict = {
-        "obs": torch.randn(B, To, C, H, W),  # Image-based observations
+        "image": torch.randn(B, To, C, H, W),  # Flattened RGB input
+        "agent_pos": torch.randn(B, To, D),  # Flattened low-dimensional input
     }
 
     shape_meta = {
-        "action": {"shape": (D,), "type": "low_dim"},
-        "obs": {"shape": (C, H, W), "type": "rgb"},
+        "action": {"shape": (D,), "type": "low_dim"},  # Action metadata
+        # "obs": {"shape": (C, H, W), "type": "rgb"},  # Image metadata
+        "obs": {
+            "image": {"shape": (C, H, W), "type": "rgb"},
+            "agent_pos": {"shape": (D,), "type": "low_dim"},
+        },
     }
 
-    policy = DiffusionUnetImagePolicy(
+    policy = UnetImageDiffusionPolicy(
         shape_meta=shape_meta,
         noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
         obs_encoder=ObsEncoder(shape_meta, vision_backbone=None),
@@ -295,13 +343,15 @@ def test_predict_action():
         num_action_steps=Ta,
         num_obs_steps=To,
     )
-
+    policy.set_normalizer(dataset_normalizer)
+    """
     example_data = {
         "obs": torch.randn(B, To, C, H, W),
-        "action": torch.randn(B, Ta, D),  # Match action time steps
+        "action": torch.randn(B, , D),
     }
-    policy.normalizer.fit(example_data)
 
+    policy.normalizer.fit(example_data)
+    """
     output = policy.predict_action(obs_dict)
     assert (
         "action" in output and "action_pred" in output
@@ -319,31 +369,44 @@ def test_compute_loss():
     B, T, C, H, W = 4, 32, 3, 224, 224
     D = 16
 
+    from shared.datasets.pusht_image_dataset import PushTImageDataset
+
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    os.chdir(project_root)
+
+    print(os.path.expanduser("data/pusht/pusht_cchi_v7_replay.zarr"))
+    print("Current working directory:", os.getcwd())
+
+    dataset = PushTImageDataset("data/pusht/pusht_cchi_v7_replay.zarr")
+    dataset_normalizer = dataset.get_normalizer()
+    print("Type of dataset_normalizer:", type(dataset_normalizer))
+    print("State dict of dataset_normalizer:", dataset_normalizer.state_dict())
+    print("dataset normalizer get params: ", dataset_normalizer.get_params())
+
     batch = {
-        "rgb": torch.randn(B, T, C, H, W),
+        "obs": {"image": torch.randn(B, T, C, H, W), "agent_pos": torch.randn(B, T, D)},
         "action": torch.randn(B, T, D),
     }
 
     # Flattened shape_meta
     shape_meta = {
-        "rgb": {"shape": (C, H, W), "type": "rgb"},  # Flattened key for image metadata
-        "action": {"shape": (D,), "type": "low_dim"},
+        "action": {"shape": (D,), "type": "low_dim"},  # Action metadata
+        # "obs": {"shape": (C, H, W), "type": "rgb"},  # Image metadata
+        "obs": {
+            "image": {"shape": (C, H, W), "type": "rgb"},
+            "agent_pos": {"shape": (D,), "type": "low_dim"},
+        },
     }
 
-    policy = DiffusionUnetImagePolicy(
+    policy = UnetImageDiffusionPolicy(
         shape_meta=shape_meta,
         noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
         obs_encoder=ObsEncoder(shape_meta, vision_backbone=None),
-        horizon=T,
+        horizon=T,  # Horizon includes observation and action time steps
         num_action_steps=5,
         num_obs_steps=2,
     )
-
-    example_data = {
-        "rgb": torch.randn(B, T, C, H, W),
-        "action": torch.randn(B, T, D),
-    }
-    policy.normalizer.fit(example_data)
+    policy.set_normalizer(dataset_normalizer)
 
     loss = policy.compute_loss(batch)
     print("Loss: ", loss.item())
@@ -357,7 +420,7 @@ def test_integration():
     D = 16
 
     batch = {
-        "rgb": torch.randn(B, T, C, H, W),
+        "obs": torch.randn(B, T, C, H, W),
         "action": torch.randn(B, T, D),
     }
 
@@ -366,7 +429,7 @@ def test_integration():
         "action": {"shape": (D,), "type": "low_dim"},
     }
 
-    policy = DiffusionUnetImagePolicy(
+    policy = UnetImageDiffusionPolicy(
         shape_meta=shape_meta,
         noise_scheduler=DDPMScheduler(num_train_timesteps=1000),
         obs_encoder=ObsEncoder(shape_meta, vision_backbone=None),

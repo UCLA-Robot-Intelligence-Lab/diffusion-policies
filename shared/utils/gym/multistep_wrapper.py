@@ -81,40 +81,40 @@ class MultiStepWrapper(gym.Wrapper):
     def __init__(
         self,
         env,
-        n_obs_steps,
-        n_action_steps,
+        num_obs_steps,
+        num_action_steps,
         max_episode_steps=None,
         reward_agg_method="max",
     ):
         super().__init__(env)
-        self._action_space = repeated_space(env.action_space, n_action_steps)
-        self._observation_space = repeated_space(env.observation_space, n_obs_steps)
+        self._action_space = repeated_space(env.action_space, num_action_steps)
+        self._observation_space = repeated_space(env.observation_space, num_obs_steps)
         self.max_episode_steps = max_episode_steps
-        self.n_obs_steps = n_obs_steps
-        self.n_action_steps = n_action_steps
+        self.num_obs_steps = num_obs_steps
+        self.num_action_steps = num_action_steps
         self.reward_agg_method = reward_agg_method
-        self.n_obs_steps = n_obs_steps
+        self.num_obs_steps = num_obs_steps
 
-        self.obs = deque(maxlen=n_obs_steps + 1)
+        self.obs = deque(maxlen=num_obs_steps + 1)
         self.reward = list()
         self.done = list()
-        self.info = defaultdict(lambda: deque(maxlen=n_obs_steps + 1))
+        self.info = defaultdict(lambda: deque(maxlen=num_obs_steps + 1))
 
     def reset(self):
         """Resets the environment using kwargs."""
         obs = super().reset()
 
-        self.obs = deque([obs], maxlen=self.n_obs_steps + 1)
+        self.obs = deque([obs], maxlen=self.num_obs_steps + 1)
         self.reward = list()
         self.done = list()
-        self.info = defaultdict(lambda: deque(maxlen=self.n_obs_steps + 1))
+        self.info = defaultdict(lambda: deque(maxlen=self.num_obs_steps + 1))
 
-        obs = self._get_obs(self.n_obs_steps)
+        obs = self._get_obs(self.num_obs_steps)
         return obs
 
     def step(self, action):
         """
-        actions: (n_action_steps,) + action_shape
+        actions: (num_action_steps,) + action_shape
         """
         for act in action:
             if len(self.done) > 0 and self.done[-1]:
@@ -132,10 +132,10 @@ class MultiStepWrapper(gym.Wrapper):
             self.done.append(done)
             self._add_info(info)
 
-        observation = self._get_obs(self.n_obs_steps)
+        observation = self._get_obs(self.num_obs_steps)
         reward = aggregate(self.reward, self.reward_agg_method)
         done = aggregate(self.done, "max")
-        info = dict_take_last_n(self.info, self.n_obs_steps)
+        info = dict_take_last_n(self.info, self.num_obs_steps)
         return observation, reward, done, info
 
     def _get_obs(self, n_steps=1):

@@ -127,7 +127,10 @@ def replace_bn_with_gn(model):
             replace_bn_with_gn(child)
 
 
-def get_resnet18(num_classes=1000, pretrained=True):
+# TODO: Update parameters better here, name and weights are not being used
+def get_resnet18(
+    name="resnet18", weights="IMAGENET1K_V1", num_classes=1000, pretrained=True
+):
     encoders_dir = os.path.dirname(os.path.abspath(__file__))
     weights_dir = os.path.join(encoders_dir, "weights")
     os.makedirs(weights_dir, exist_ok=True)
@@ -140,7 +143,7 @@ def get_resnet18(num_classes=1000, pretrained=True):
             torch.save(weights, weights_path)
         else:
             print("Loading pretrained weights from local directory...")
-            weights = torch.load(weights_path, weights_only=True)
+            weights = torch.load(weights_path)
 
         model = pretrained_resnet18(weights=None)
         model.load_state_dict(weights)

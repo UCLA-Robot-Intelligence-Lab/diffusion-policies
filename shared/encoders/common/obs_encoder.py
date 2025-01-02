@@ -1,23 +1,11 @@
+import copy
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
-
 from shared.encoders.resnet.resnet_18 import get_resnet18
 from shared.encoders.common.crop_randomizer import CropRandomizer
+from shared.utils.pytorch_util import replace_submodules
 from typing import Dict, Tuple, Union
-
-"""
-
-Dimension key:
-
-B: batch size
-C: input channels / dimensions (e.g., RGB image channels)
-H: image height
-W: image width
-D: output feature dimensions
-L: low-dimensional feature dimensions
-
-"""
 
 
 class ObsEncoder(nn.Module):
@@ -28,135 +16,155 @@ class ObsEncoder(nn.Module):
 
     def __init__(
         self,
-        shape_meta: Dict[str, Dict[str, Tuple[int, ...]]],
-        vision_backbone: nn.Module = None,
-        resize_shape: Tuple[int, int] = (224, 224),
+        shape_meta: Dict[
+            str, Dict[str, Union[Dict[str, Tuple[int, ...]], Tuple[int, ...]]]
+        ],
+        vision_backbone: Union[nn.Module, Dict[str, nn.Module]] = None,
+        resize_shape: Union[Tuple[int, int], Dict[str, Tuple[int, int]], None] = None,
+        crop_shape: Union[Tuple[int, int], Dict[str, Tuple[int, int]], None] = None,
         random_crop: bool = True,
-        crop_shape: Tuple[int, int] = (84, 84),
         imagenet_norm: bool = True,
+        use_group_norm: bool = False,
         share_vision_backbone: bool = True,
     ):
-        """
-        Args:
-            shape_meta: Metadata describing input observation shapes and types.
-            vision_backbone: Pretrained vision model (e.g., ResNet). Defaults to ResNet18.
-            resize_shape: Tuple specifying height and width for image resizing.
-            random_crop: If True, we apply random crops to our input observations
-            crop_shape: Tuple specifying height and width for crop sizing
-            imagenet_norm: If True, applies ImageNet normalization to RGB inputs.
-            share_vision_backbone: If True, all RGB inputs share the same vision model.
-        """
         super().__init__()
+        # print("ObsEncoder initialized with shape_meta:", shape_meta)
         self.shape_meta = shape_meta
         self.share_vision_backbone = share_vision_backbone
-        self.resize_shape = resize_shape
-        self.imagenet_norm = imagenet_norm
+        self.rgb_keys = []
+        self.low_dim_keys = []
+        self.key_model_map = nn.ModuleDict()
+        self.key_transform_map = nn.ModuleDict()
+        self.key_shape_map = {}
 
-        # Initialize vision backbone
-        self.vision_backbone = vision_backbone or get_resnet18(
-            num_classes=1000, pretrained=True
-        )  # TODO: Check if 512/1000 classes is correct? Does it matter?
-        self.rgb_keys = [
-            key for key, meta in shape_meta.items() if meta.get("type") == "rgb"
-        ]
-        self.low_dim_keys = [
-            key for key, meta in shape_meta.items() if meta.get("type") == "low_dim"
-        ]
+        # Handle shared vision backbone
+        if share_vision_backbone:
+            if vision_backbone is None:
+                vision_backbone = get_resnet18(pretrained=True)  # Default to ResNet18
+            assert isinstance(vision_backbone, nn.Module)
+            self.key_model_map["shared_rgb"] = vision_backbone
 
-        crop_randomizer = CropRandomizer(
-            input_shape=(3, *resize_shape),
-            crop_height=crop_shape[0],
-            crop_width=crop_shape[1],
-            num_crops=1,
-            pos_enc=False,
-        )
+        obs_shape_meta = shape_meta["obs"]
+        for key, attr in obs_shape_meta.items():
+            shape = tuple(attr["shape"])
+            obs_type = attr.get("type", "low_dim")
+            self.key_shape_map[key] = shape
 
-        # Transformation pipeline for images
-        self.image_transform = T.Compose(
-            [
-                T.Resize(resize_shape),
-                (crop_randomizer if random_crop else nn.Identity()),
-                (
-                    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                    if imagenet_norm
-                    else nn.Identity()
-                ),
-            ]
-        )
+            if obs_type == "rgb":
+                self.rgb_keys.append(key)
+                # Configure model for this key
+                if not share_vision_backbone:
+                    if isinstance(vision_backbone, dict):
+                        self.key_model_map[key] = vision_backbone[key]
+                    else:
+                        assert isinstance(vision_backbone, nn.Module)
+                        self.key_model_map[key] = copy.deepcopy(vision_backbone)
 
-        # Create a dictionary of models for each RGB input if models are not shared
-        if not share_vision_backbone:
-            self.key_model_map = nn.ModuleDict(
-                {
-                    key: get_resnet18(pretrained=True, num_classes=1000)
-                    for key in self.rgb_keys
-                }
-            )
-        else:
-            self.key_model_map = nn.ModuleDict({"shared_rgb": self.vision_backbone})
+                # Apply GroupNorm if specified
+                # removed since it was causing issues and by defualt our resnet comes with GN
+
+                # Configure resizing and cropping
+                resizer = nn.Identity()
+                if resize_shape:
+                    h, w = (
+                        resize_shape[key]
+                        if isinstance(resize_shape, dict)
+                        else resize_shape
+                    )
+                    resizer = T.Resize(size=(h, w))
+                    shape = (shape[0], h, w)
+
+                randomizer = nn.Identity()
+                if crop_shape:
+                    h, w = (
+                        crop_shape[key] if isinstance(crop_shape, dict) else crop_shape
+                    )
+                    if random_crop:
+                        randomizer = CropRandomizer(
+                            input_shape=shape,
+                            crop_height=h,
+                            crop_width=w,
+                            num_crops=1,
+                            pos_enc=False,
+                        )
+                    else:
+                        randomizer = T.CenterCrop(size=(h, w))
+
+                normalizer = nn.Identity()
+                if imagenet_norm:
+                    normalizer = T.Normalize(
+                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                    )
+
+                self.key_transform_map[key] = nn.Sequential(
+                    resizer, randomizer, normalizer
+                )
+
+            elif obs_type == "low_dim":
+                self.low_dim_keys.append(key)
+            else:
+                raise ValueError(f"Unsupported observation type: {obs_type}")
+
+        # Sort keys for consistent ordering
+        self.rgb_keys = sorted(self.rgb_keys)
+        self.low_dim_keys = sorted(self.low_dim_keys)
 
     def forward(self, obs_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Encodes observations into a unified feature tensor.
-
-        Args:
-            obs_dict: Dictionary of input observations, with keys matching `shape_meta`.
-
-        Returns:
-            torch.Tensor: Unified feature tensor of shape [B, D].
-        """
         batch_size = None
         features = []
 
-        # Process RGB inputs
-        for key in self.rgb_keys:
-            if key not in obs_dict:
-                continue
-            img_BCHW = obs_dict[key]
-            if batch_size is None:
-                batch_size = img_BCHW.shape[0]
-            else:
-                assert (
-                    batch_size == img_BCHW.shape[0]
-                ), "Inconsistent batch size across inputs."
+        if self.share_vision_backbone:
+            # Pass all RGB observations to the shared vision model
+            imgs = []
+            for key in self.rgb_keys:
+                img = obs_dict[key]
+                if batch_size is None:
+                    batch_size = img.shape[0]
+                else:
+                    assert batch_size == img.shape[0]
+                img = self.key_transform_map[key](img)
+                imgs.append(img)
 
-            img_BCHW = self.image_transform(img_BCHW)
-            model = (
-                self.key_model_map["shared_rgb"]
-                if self.share_vision_backbone
-                else self.key_model_map[key]
+            # Process concatenated images
+            imgs = torch.cat(imgs, dim=0)
+            feature = self.key_model_map["shared_rgb"](imgs)
+            feature = (
+                feature.view(len(self.rgb_keys), batch_size, -1)
+                .transpose(0, 1)
+                .contiguous()
             )
-            features.append(model(img_BCHW))
+            features.append(feature.view(batch_size, -1))
+        else:
+            # Pass each RGB observation to its own model
+            for key in self.rgb_keys:
+                img = obs_dict[key]
+                if batch_size is None:
+                    batch_size = img.shape[0]
+                else:
+                    assert batch_size == img.shape[0]
+                img = self.key_transform_map[key](img)
+                feature = self.key_model_map[key](img)
+                features.append(feature)
 
-        # Process low-dimensional inputs
+        # Add low-dimensional features
         for key in self.low_dim_keys:
-            if key not in obs_dict:
-                continue
-            low_dim_BL = obs_dict[key]
+            data = obs_dict[key]
             if batch_size is None:
-                batch_size = low_dim_BL.shape[0]
+                batch_size = data.shape[0]
             else:
-                assert (
-                    batch_size == low_dim_BL.shape[0]
-                ), "Inconsistent batch size across inputs."
+                assert batch_size == data.shape[0]
+            features.append(data)
 
-            features.append(low_dim_BL)
-
-        assert features, "No valid inputs found in obs_dict."
+        # Concatenate features
         return torch.cat(features, dim=-1)
 
+    @torch.no_grad()
     def output_shape(self) -> Tuple[int, ...]:
-        """
-        Calculates the output shape of the encoder based on metadata.
-
-        Returns:
-            Tuple[int, ...]: Shape of the encoded feature vector.
-        """
         example_obs = {
-            key: torch.zeros(1, *meta["shape"]) for key, meta in self.shape_meta.items()
+            key: torch.zeros((1,) + shape, dtype=torch.float32)
+            for key, shape in self.key_shape_map.items()
         }
-        with torch.no_grad():
-            output = self.forward(example_obs)
+        output = self.forward(example_obs)
         return output.shape[1:]
 
 
@@ -164,30 +172,45 @@ def test_obs_encoder():
     B, C, H, W = 4, 3, 256, 256
     D = 10
     crop_height, crop_width = 112, 112
+
+    # Updated shape_meta structure with nested observations
     shape_meta = {
-        "rgb": {"shape": (C, H, W), "type": "rgb"},
-        "low_dim": {"shape": (D,), "type": "low_dim"},
+        "obs": {
+            "image": {"shape": (C, H, W), "type": "rgb"},  # RGB observation
+            "agent_pos": {
+                "shape": (D,),
+                "type": "low_dim",
+            },  # Low-dimensional observation
+        },
+        "action": {"shape": (D,), "type": "low_dim"},  # Action metadata
     }
 
+    # Flattened observation dictionary to match expected structure
     obs_dict = {
-        "rgb": torch.randn(B, C, H, W),
-        "low_dim": torch.randn(B, D),
+        "image": torch.randn(B, C, H, W),  # Flattened RGB input
+        "agent_pos": torch.randn(B, D),  # Flattened low-dimensional input
     }
 
+    # Initialize the encoder
     encoder = ObsEncoder(
         shape_meta=shape_meta,
-        vision_backbone=None,
+        vision_backbone=None,  # Use default ResNet18
         resize_shape=(224, 224),
         random_crop=True,
         crop_shape=(crop_height, crop_width),
         imagenet_norm=True,
     )
 
+    # Perform forward pass
     output = encoder(obs_dict)
 
+    # Assertions for testing
     assert isinstance(output, torch.Tensor), "Output is not a torch.Tensor."
     assert output.shape[0] == B, "Output batch size mismatch."
     print("Output shape:", output.shape)
+
+    output_shape = encoder.output_shape()
+    print("Expected output shape:", output_shape)
 
     print("test_obs_encoder passed!")
 

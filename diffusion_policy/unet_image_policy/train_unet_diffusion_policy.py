@@ -24,13 +24,14 @@ from torch.utils.data import DataLoader
 
 # -- Imports for the diffusion policy and utilities --
 from diffusion_policy.unet_image_policy.unet_image_diffusion_policy import (
-    DiffusionUnetImagePolicy,
+    UnetImageDiffusionPolicy,
 )
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
 from shared.utils.pytorch_util import dict_apply, optimizer_to
 from shared.models.unet.ema_model import EMAModel
 from shared.models.common.lr_scheduler import get_scheduler
+
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -73,10 +74,13 @@ class TrainUnetImageDiffusionPolicy:
          - Model state dict, optimizer state dict
          - EMA model state if applicable
         """
+        print("PATH: ", path)
         if path is None:
             ckpt_dir = pathlib.Path(self.output_dir).joinpath("checkpoints")
             ckpt_dir.mkdir(parents=True, exist_ok=True)
             path = ckpt_dir.joinpath(f"{tag}.ckpt")
+        else:
+            path = pathlib.Path(path)
 
         checkpoint = {
             "cfg": self.cfg,
@@ -89,7 +93,9 @@ class TrainUnetImageDiffusionPolicy:
         if self.ema_model is not None:
             checkpoint["ema_model_state_dict"] = self.ema_model.state_dict()
 
-        torch.save(checkpoint, path.open("wb"))
+        # torch.save(checkpoint, path.open("wb"))
+        with path.open("wb") as f:
+            torch.save(checkpoint, f)
         print(f"Checkpoint saved to {path}")
 
     def load_checkpoint(self, path=None, tag="latest"):
@@ -138,7 +144,8 @@ class TrainUnetImageDiffusionPolicy:
          4) Initialize W&B logging
          5) Perform training, validation, rollout, sampling
         """
-        if self.cfg.training.resume:
+        cfg = copy.deepcopy(self.cfg)
+        if cfg.training.resume:
             last_ckpt = pathlib.Path(self.output_dir).joinpath(
                 "checkpoints", "latest.ckpt"
             )
@@ -147,11 +154,11 @@ class TrainUnetImageDiffusionPolicy:
                 self.load_checkpoint(path=last_ckpt)
 
         # WARNING: I am not using the BaseImageDataset!
-        train_dataset = hydra.utils.instantiate(self.cfg.task.dataset)
-        train_dataloader = DataLoader(train_dataset, **self.cfg.dataloader)
+        train_dataset = hydra.utils.instantiate(cfg.tasks.dataset)
+        train_dataloader = DataLoader(train_dataset, **cfg.dataloader)
 
         val_dataset = train_dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **self.cfg.val_dataloader)
+        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         normalizer = train_dataset.get_normalizer()
         self.model.set_normalizer(normalizer)
@@ -159,64 +166,64 @@ class TrainUnetImageDiffusionPolicy:
             self.ema_model.set_normalizer(normalizer)
 
         total_train_steps = (
-            len(train_dataloader) * self.cfg.training.num_epochs
-        ) // self.cfg.training.gradient_accumulate_every
+            len(train_dataloader) * cfg.training.num_epochs
+        ) // cfg.training.gradient_accumulate_every
 
         lr_scheduler = get_scheduler(
-            self.cfg.training.lr_scheduler,
+            cfg.training.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=self.cfg.training.lr_warmup_steps,
+            num_warmup_steps=cfg.training.lr_warmup_steps,
             num_training_steps=total_train_steps,
             last_epoch=self.global_step - 1,
         )
 
         ema_obj = None
-        if self.cfg.training.use_ema:
-            ema_obj = hydra.utils.instantiate(self.cfg.ema, model=self.ema_model)
+        if cfg.training.use_ema:
+            ema_obj = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
         # WARNING: I am not using the BaseImageRunner!
         env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner, output_dir=self.output_dir
+            cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
         wandb_run = wandb.init(
             dir=str(self.output_dir),
-            config=OmegaConf.to_container(self.cfg, resolve=True),
-            **self.cfg.logging,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            **cfg.logging,
         )
         wandb.config.update({"output_dir": self.output_dir})
 
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"),
-            **self.cfg.checkpoint.topk,
+            **cfg.checkpoint.topk,
         )
 
-        device = torch.device(self.cfg.training.device)
+        device = torch.device(cfg.training.device)
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
 
         # Possibly debug mode overrides?
-        if self.cfg.training.debug:
-            self.cfg.training.num_epochs = 2
-            self.cfg.training.max_train_steps = 3
-            self.cfg.training.max_val_steps = 3
-            self.cfg.training.rollout_every = 1
-            self.cfg.training.checkpoint_every = 1
-            self.cfg.training.val_every = 1
-            self.cfg.training.sample_every = 1
+        if cfg.training.debug:
+            cfg.training.num_epochs = 2
+            cfg.training.max_train_steps = 3
+            cfg.training.max_val_steps = 3
+            cfg.training.rollout_every = 1
+            cfg.training.checkpoint_every = 1
+            cfg.training.val_every = 1
+            cfg.training.sample_every = 1
 
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         train_sampling_batch = None
 
         # -- TRAINING LOOP --
         with JsonLogger(log_path) as json_logger:
-            for local_epoch_idx in range(self.cfg.training.num_epochs):
+            for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = dict()
 
                 # ========= Train for this epoch ==========
-                if self.cfg.training.freeze_encoder:
+                if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
 
@@ -237,13 +244,12 @@ class TrainUnetImageDiffusionPolicy:
 
                         # Compute loss
                         raw_loss = self.model.compute_loss(batch)
-                        loss = raw_loss / self.cfg.training.gradient_accumulate_every
+                        loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
                         # Step optimizer
                         if (
-                            self.global_step
-                            % self.cfg.training.gradient_accumulate_every
+                            self.global_step % cfg.training.gradient_accumulate_every
                             == 0
                         ):
                             self.optimizer.step()
@@ -266,16 +272,17 @@ class TrainUnetImageDiffusionPolicy:
                         }
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
-                        if not is_last_batch:
-                            # Log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
-                            json_logger.log(step_log)
-                            self.global_step += 1
-
+                        # if not is_last_batch:
+                        # Log of last step is combined with validation and rollout
+                        # This is probably buggy
+                        #    print("is_last_batch: ", self.global_step)
+                        wandb_run.log(step_log, step=self.global_step)
+                        json_logger.log(step_log)
+                        self.global_step += 1
+                        print("Step: ", self.global_step)
                         # Early stop for debug
-                        if (
-                            self.cfg.training.max_train_steps is not None
-                            and batch_idx >= (self.cfg.training.max_train_steps - 1)
+                        if cfg.training.max_train_steps is not None and batch_idx >= (
+                            cfg.training.max_train_steps - 1
                         ):
                             break
 
@@ -296,7 +303,7 @@ class TrainUnetImageDiffusionPolicy:
                     step_log.update(runner_log)
 
                 # -- VALIDATION --
-                if (self.epoch % self.cfg.training.val_every) == 0:
+                if (self.epoch % cfg.training.val_every) == 0:
                     val_losses = []
                     with torch.no_grad():
                         loader_desc = f"Validation epoch {self.epoch}"
@@ -311,9 +318,8 @@ class TrainUnetImageDiffusionPolicy:
                                 val_losses.append(loss.item())
 
                                 if (
-                                    self.cfg.training.max_val_steps is not None
-                                    and batch_idx
-                                    >= (self.cfg.training.max_val_steps - 1)
+                                    cfg.training.max_val_steps is not None
+                                    and batch_idx >= (cfg.training.max_val_steps - 1)
                                 ):
                                     break
 
@@ -323,7 +329,7 @@ class TrainUnetImageDiffusionPolicy:
 
                 # -- SAMPLING --
                 if (
-                    self.epoch % self.cfg.training.sample_every
+                    self.epoch % cfg.training.sample_every
                 ) == 0 and train_sampling_batch:
                     with torch.no_grad():
                         batch = dict_apply(
@@ -340,11 +346,11 @@ class TrainUnetImageDiffusionPolicy:
                         step_log["train_action_mse_error"] = mse_error.item()
 
                 # -- CHECKPOINTING --
-                if (self.epoch % self.cfg.training.checkpoint_every) == 0:
-                    if self.cfg.checkpoint.save_last_ckpt:
+                if (self.epoch % cfg.training.checkpoint_every) == 0:
+                    if cfg.checkpoint.save_last_ckpt:
                         self.save_checkpoint()
 
-                    if self.cfg.checkpoint.save_last_snapshot:
+                    if cfg.checkpoint.save_last_snapshot:
                         self.save_snapshot()
 
                     metric_dict = {k.replace("/", "_"): v for k, v in step_log.items()}
@@ -359,7 +365,7 @@ class TrainUnetImageDiffusionPolicy:
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
 
-                self.global_step += 1
+                # self.global_step += 1
                 self.epoch += 1
                 # May the gradients flow :)
 
@@ -371,7 +377,8 @@ class TrainUnetImageDiffusionPolicy:
 )
 def main(cfg):
     # Hydra entry point. Instantiates and runs the training process.
-    trainer = TrainDiffusionUnetImagePolicy(cfg)
+    print(OmegaConf.to_yaml(cfg))
+    trainer = TrainUnetImageDiffusionPolicy(cfg)
     trainer.run()
 
 

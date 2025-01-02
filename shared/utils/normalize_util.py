@@ -5,7 +5,7 @@ All credit goes to them.
 """
 
 import numpy as np
-
+import torch
 from shared.models.common.normalizer import SingleFieldLinearNormalizer
 from shared.utils.pytorch_util import dict_apply, dict_apply_reduce, dict_apply_split
 
@@ -28,21 +28,17 @@ def get_range_normalizer_from_stat(stat, output_max=1, output_min=-1, range_eps=
 
 # This was updated; double check that this works as expected
 def get_image_range_normalizer():
-    scale = torch.tensor([2], dtype=torch.float32)
-    offset = torch.tensor([-1], dtype=torch.float32)
+    scale = np.array([2], dtype=np.float32)
+    offset = np.array([-1], dtype=np.float32)
     stat = {
-        "min": torch.tensor([0], dtype=torch.float32),
-        "max": torch.tensor([1], dtype=torch.float32),
-        "mean": torch.tensor([0.5], dtype=torch.float32),
-        "std": torch.tensor([np.sqrt(1 / 12)], dtype=torch.float32),
+        "min": np.array([0], dtype=np.float32),
+        "max": np.array([1], dtype=np.float32),
+        "mean": np.array([0.5], dtype=np.float32),
+        "std": np.array([np.sqrt(1 / 12)], dtype=np.float32),
     }
-    normalizer = SingleFieldLinearNormalizer(mode="limits")  # Mode doesn't matter here
-    normalizer.params = {
-        "scale": scale,
-        "offset": offset,
-        "input_stats": stat,
-    }
-    return normalizer
+    return SingleFieldLinearNormalizer.create_manual(
+        scale=scale, offset=offset, input_stats_dict=stat
+    )
 
 
 def get_identity_normalizer_from_stat(stat):
