@@ -7,14 +7,13 @@ from einops import rearrange, reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from shared.models.common.normalizer import LinearNormalizer
-from diffusion_policy.base_image_policy import BaseImagePolicy
 from shared.models.unet.conditional_unet1d import ConditionalUnet1D
 from shared.models.common.mask_generator import LowdimMaskGenerator
 from shared.vision.common.multi_image_obs_encoder import MultiImageObsEncoder
 from shared.utils.pytorch_util import dict_apply
 
 
-class DiffusionUnetImagePolicy(BaseImagePolicy):
+class DiffusionUnetImagePolicy(nn.Module):
     def __init__(
         self,
         shape_meta: dict,
@@ -82,6 +81,17 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
+
+    def reset(self):
+        pass  # Only used for stateful policies?
+
+    @property
+    def device(self):
+        return next(iter(self.parameters())).device
+
+    @property
+    def dtype(self):
+        return next(iter(self.parameters())).dtype
 
     # ========= inference  ============
     def conditional_sample(

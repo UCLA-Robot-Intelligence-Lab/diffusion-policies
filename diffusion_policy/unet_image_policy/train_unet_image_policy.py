@@ -270,6 +270,8 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
 
                         result = policy.predict_action(obs_dict)
                         pred_action = result["action_pred"]
+                        print("pred action mean: ", pred_action.mean())
+                        print("gt_action mean: ", gt_action.mean())
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
                         del batch

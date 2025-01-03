@@ -18,7 +18,6 @@ from shared.utils.gym.video_recording_wrapper import (
 )
 from shared.utils.pytorch_util import dict_apply
 from shared.env.base_image_runner import BaseImageRunner
-from diffusion_policy.base_image_policy import BaseImagePolicy
 
 
 class PushTImageRunner(BaseImageRunner):
@@ -147,7 +146,7 @@ class PushTImageRunner(BaseImageRunner):
         self.max_steps = max_steps
         self.tqdm_interval_sec = tqdm_interval_sec
 
-    def run(self, policy: BaseImagePolicy):
+    def run(self, policy):
         device = policy.device
         dtype = policy.dtype
         env = self.env
