@@ -2,7 +2,6 @@ import torch
 
 from typing import Sequence, Optional
 from torch import nn
-from shared.models.common.module_attr_mixin import ModuleAttrMixin
 
 
 def get_intersection_slice_mask(
@@ -26,9 +25,18 @@ def get_union_slice_mask(
     return mask
 
 
-class DummyMaskGenerator(ModuleAttrMixin):
+class DummyMaskGenerator(nn.Module):
     def __init__(self):
         super().__init__()
+        self.dummy_variable = nn.Parameter()
+
+    @property
+    def device(self):
+        return next(iter(self.parameters())).device
+
+    @property
+    def dtype(self):
+        return next(iter(self.parameters())).dtype
 
     @torch.no_grad()
     def forward(self, shape):
@@ -37,7 +45,7 @@ class DummyMaskGenerator(ModuleAttrMixin):
         return mask
 
 
-class LowdimMaskGenerator(ModuleAttrMixin):
+class LowdimMaskGenerator(nn.Module):
     def __init__(
         self,
         action_dim,
@@ -54,6 +62,15 @@ class LowdimMaskGenerator(ModuleAttrMixin):
         self.max_n_obs_steps = max_n_obs_steps
         self.fix_obs_steps = fix_obs_steps
         self.action_visible = action_visible
+        self.dummy_varibale = nn.Parameter()
+
+    @property
+    def device(self):
+        return next(iter(self.parameters())).device
+
+    @property
+    def dtype(self):
+        return next(iter(self.parameters())).dtype
 
     @torch.no_grad()
     def forward(self, shape, seed=None):
@@ -104,7 +121,7 @@ class LowdimMaskGenerator(ModuleAttrMixin):
         return mask
 
 
-class KeypointMaskGenerator(ModuleAttrMixin):
+class KeypointMaskGenerator(nn.Module):
     def __init__(
         self,
         # dimensions
@@ -131,6 +148,15 @@ class KeypointMaskGenerator(ModuleAttrMixin):
         self.time_independent = time_independent
         self.action_visible = action_visible
         self.n_context_steps = n_context_steps
+        self.dummy_parameter = nn.Parameter()
+
+    @property
+    def device(self):
+        return next(iter(self.parameters())).device
+
+    @property
+    def dtype(self):
+        return next(iter(self.parameters())).dtype
 
     @torch.no_grad()
     def forward(self, shape, seed=None):

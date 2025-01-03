@@ -5,11 +5,10 @@ import torchvision
 
 from typing import Dict, Tuple, Union
 from shared.vision.common.crop_randomizer import CropRandomizer
-from shared.models.common.module_attr_mixin import ModuleAttrMixin
 from shared.utils.pytorch_util import dict_apply, replace_submodules
 
 
-class MultiImageObsEncoder(ModuleAttrMixin):
+class MultiImageObsEncoder(nn.Module):
     def __init__(
         self,
         shape_meta: dict,
@@ -125,6 +124,15 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         self.rgb_keys = rgb_keys
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
+        self.dummy_parameter = nn.Parameter()
+
+    @property
+    def device(self):
+        return next(iter(self.parameters())).device
+
+    @property
+    def dtype(self):
+        return next(iter(self.parameters())).dtype
 
     def forward(self, obs_dict):
         batch_size = None
