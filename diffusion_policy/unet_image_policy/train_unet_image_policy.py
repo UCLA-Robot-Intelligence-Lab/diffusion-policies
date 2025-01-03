@@ -7,21 +7,26 @@ if __name__ == "__main__":
     sys.path.append(ROOT_DIR)
     os.chdir(ROOT_DIR)
 
+
 import os
-import hydra
-import torch
 import pathlib
+import hydra
 import copy
+import dill
+import torch
+import threading
+import sys
 import random
 import wandb
 import tqdm
 import numpy as np
 import shutil
 
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
+from typing import Optional
 from torch.utils.data import DataLoader
 
-from diffusion_policy.base_workspace import BaseWorkspace
 from diffusion_policy.unet_image_policy.unet_image_policy import (
     DiffusionUnetImagePolicy,
 )
@@ -36,110 +41,127 @@ from shared.models.common.lr_scheduler import get_scheduler
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
-class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
-    include_keys = ["global_step", "epoch"]
+def _copy_to_cpu(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().to("cpu")
+    elif isinstance(x, dict):
+        result = dict()
+        for k, v in x.items():
+            result[k] = _copy_to_cpu(v)
+        return result
+    elif isinstance(x, list):
+        return [_copy_to_cpu(k) for k in x]
+    else:
+        return copy.deepcopy(x)
 
-    def __init__(self, cfg: OmegaConf, output_dir=None):
-        super().__init__(cfg, output_dir=output_dir)
 
-        # set seed
+class TrainDiffusionUnetImageWorkspace:
+    include_keys = ("global_step", "epoch")
+    exclude_keys = ()
+
+    def __init__(self, cfg: OmegaConf, output_dir: Optional[str] = None):
+        self.cfg = cfg
+        self._output_dir = output_dir
+        self._saving_thread = None
+
+        # Set seed
         seed = cfg.training.seed
         torch.manual_seed(seed)
         np.random.seed(seed)
         random.seed(seed)
 
-        # configure model
+        # Configure model
         self.model: DiffusionUnetImagePolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: DiffusionUnetImagePolicy = None
+        self.ema_model: Optional[DiffusionUnetImagePolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
-        # configure training state
+        # Configure optimizer
         self.optimizer = hydra.utils.instantiate(
             cfg.optimizer, params=self.model.parameters()
         )
 
-        # configure training state
+        # Initialize training state
         self.global_step = 0
         self.epoch = 0
+
+    @property
+    def output_dir(self):
+        output_dir = self._output_dir
+        if output_dir is None:
+            output_dir = HydraConfig.get().runtime.output_dir
+        return output_dir
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
 
-        # resume training
+        # Resume training if specified
         if cfg.training.resume:
-            lastest_ckpt_path = self.get_checkpoint_path()
-            if lastest_ckpt_path.is_file():
-                print(f"Resuming from checkpoint {lastest_ckpt_path}")
-                self.load_checkpoint(path=lastest_ckpt_path)
+            latest_ckpt_path = self.get_checkpoint_path()
+            if latest_ckpt_path.is_file():
+                print(f"Resuming from checkpoint {latest_ckpt_path}")
+                self.load_checkpoint(path=latest_ckpt_path)
 
-        # configure dataset
-        dataset: BaseImageDataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        # Configure dataset
+        dataset: BaseImageDataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 
-        # configure validation dataset
+        # Configure validation dataset
         val_dataset = dataset.get_validation_dataset()
         val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
         self.model.set_normalizer(normalizer)
-        if cfg.training.use_ema:
+        if self.ema_model is not None:
             self.ema_model.set_normalizer(normalizer)
 
-        # configure lr scheduler
+        # Configure learning rate scheduler
         lr_scheduler = get_scheduler(
             cfg.training.lr_scheduler,
             optimizer=self.optimizer,
             num_warmup_steps=cfg.training.lr_warmup_steps,
             num_training_steps=(len(train_dataloader) * cfg.training.num_epochs)
             // cfg.training.gradient_accumulate_every,
-            # pytorch assumes stepping LRScheduler every epoch
-            # however huggingface diffusers steps it every batch
             last_epoch=self.global_step - 1,
         )
 
-        # configure ema
-        ema: EMAModel = None
+        # Configure EMA
+        ema: Optional[EMAModel] = None
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
-        # configure env
-        env_runner: BaseImageRunner
-        env_runner = hydra.utils.instantiate(
+        # Configure environment runner
+        env_runner: BaseImageRunner = hydra.utils.instantiate(
             cfg.task.env_runner, output_dir=self.output_dir
         )
         assert isinstance(env_runner, BaseImageRunner)
 
-        # configure logging
+        # Configure logging with Weights & Biases
         wandb_run = wandb.init(
             dir=str(self.output_dir),
             config=OmegaConf.to_container(cfg, resolve=True),
             **cfg.logging,
         )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
+        wandb.config.update({"output_dir": self.output_dir})
 
-        # configure checkpoint
+        # Configure checkpoint manager
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"), **cfg.checkpoint.topk
         )
 
-        # device transfer
+        # Device setup
         device = torch.device(cfg.training.device)
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
 
-        # save batch for sampling
+        # Save batch for sampling
         train_sampling_batch = None
 
+        # Debug mode adjustments
         if cfg.training.debug:
             cfg.training.num_epochs = 2
             cfg.training.max_train_steps = 3
@@ -149,17 +171,17 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-        # training loop
+        # Training loop
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
-                step_log = dict()
-                # ========= train for this epoch ==========
+                step_log = {}
+                # ========= Train for this epoch ==========
                 if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
 
-                train_losses = list()
+                train_losses = []
                 with tqdm.tqdm(
                     train_dataloader,
                     desc=f"Training epoch {self.epoch}",
@@ -167,19 +189,19 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                     mininterval=cfg.training.tqdm_interval_sec,
                 ) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
-                        # device transfer
+                        # Device transfer
                         batch = dict_apply(
                             batch, lambda x: x.to(device, non_blocking=True)
                         )
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
 
-                        # compute loss
+                        # Compute loss
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        # step optimizer
+                        # Step optimizer
                         if (
                             self.global_step % cfg.training.gradient_accumulate_every
                             == 0
@@ -188,11 +210,11 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
 
-                        # update ema
+                        # Update EMA
                         if cfg.training.use_ema:
                             ema.step(self.model)
 
-                        # logging
+                        # Logging
                         raw_loss_cpu = raw_loss.item()
                         tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                         train_losses.append(raw_loss_cpu)
@@ -205,37 +227,36 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
                         if not is_last_batch:
-                            # log of last step is combined with validation and rollout
+                            # Log intermediate steps
                             wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
 
-                        if (cfg.training.max_train_steps is not None) and batch_idx >= (
+                        if cfg.training.max_train_steps is not None and batch_idx >= (
                             cfg.training.max_train_steps - 1
                         ):
                             break
 
-                # at the end of each epoch
-                # replace train_loss with epoch average
+                # At the end of each epoch, replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
-                # ========= eval for this epoch ==========
+                # ========= Evaluation for this epoch ==========
                 policy = self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
                 policy.eval()
 
-                # run rollout
+                # Run rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
                     runner_log = env_runner.run(policy)
-                    # log all
+                    # Log all
                     step_log.update(runner_log)
 
-                # run validation
+                # Run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
-                        val_losses = list()
+                        val_losses = []
                         with tqdm.tqdm(
                             val_dataloader,
                             desc=f"Validation epoch {self.epoch}",
@@ -250,17 +271,18 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                                 val_losses.append(loss)
                                 if (
                                     cfg.training.max_val_steps is not None
-                                ) and batch_idx >= (cfg.training.max_val_steps - 1):
+                                    and batch_idx >= (cfg.training.max_val_steps - 1)
+                                ):
                                     break
                         if len(val_losses) > 0:
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # log epoch average validation loss
+                            # Log epoch average validation loss
                             step_log["val_loss"] = val_loss
 
-                # run diffusion sampling on a training batch
+                # Run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
-                        # sample trajectory from training set, and evaluate difference
+                        # Sample trajectory from training set, and evaluate difference
                         batch = dict_apply(
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
@@ -281,36 +303,112 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                         del pred_action
                         del mse
 
-                # checkpoint
+                # Checkpointing
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
-                    # checkpointing
+                    # Save checkpoints and snapshots
                     if cfg.checkpoint.save_last_ckpt:
                         self.save_checkpoint()
                     if cfg.checkpoint.save_last_snapshot:
                         self.save_snapshot()
 
-                    # sanitize metric names
-                    metric_dict = dict()
-                    for key, value in step_log.items():
-                        new_key = key.replace("/", "_")
-                        metric_dict[new_key] = value
+                    # Sanitize metric names
+                    metric_dict = {k.replace("/", "_"): v for k, v in step_log.items()}
 
-                    # We can't copy the last checkpoint here
-                    # since save_checkpoint uses threads.
-                    # therefore at this point the file might have been empty!
+                    # Manage Top-K checkpoints
                     topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
-
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
-                # ========= eval end for this epoch ==========
+
+                # ========= End of Evaluation ==========
                 policy.train()
 
-                # end of epoch
-                # log of last step is combined with validation and rollout
+                # End of epoch logging
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
                 self.global_step += 1
                 self.epoch += 1
+
+    def save_checkpoint(
+        self,
+        path=None,
+        tag="latest",
+        exclude_keys=None,
+        include_keys=None,
+        use_thread=True,
+    ):
+        if path is None:
+            path = pathlib.Path(self.output_dir).joinpath("checkpoints", f"{tag}.ckpt")
+        else:
+            path = pathlib.Path(path)
+        if exclude_keys is None:
+            exclude_keys = tuple(self.exclude_keys)
+        if include_keys is None:
+            include_keys = tuple(self.include_keys) + ("_output_dir",)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"cfg": self.cfg, "state_dicts": {}, "pickles": {}}
+
+        for key, value in self.__dict__.items():
+            if hasattr(value, "state_dict") and hasattr(value, "load_state_dict"):
+                # Modules, optimizers, etc.
+                if key not in exclude_keys:
+                    if use_thread:
+                        payload["state_dicts"][key] = _copy_to_cpu(value.state_dict())
+                    else:
+                        payload["state_dicts"][key] = value.state_dict()
+            elif key in include_keys:
+                payload["pickles"][key] = dill.dumps(value)
+        if use_thread:
+            self._saving_thread = threading.Thread(
+                target=lambda: torch.save(payload, path.open("wb"), pickle_module=dill)
+            )
+            self._saving_thread.start()
+        else:
+            torch.save(payload, path.open("wb"), pickle_module=dill)
+        return str(path.absolute())
+
+    def get_checkpoint_path(self, tag="latest"):
+        return pathlib.Path(self.output_dir).joinpath("checkpoints", f"{tag}.ckpt")
+
+    def load_payload(self, payload, exclude_keys=None, include_keys=None, **kwargs):
+        if exclude_keys is None:
+            exclude_keys = ()
+        if include_keys is None:
+            include_keys = payload["pickles"].keys()
+
+        for key, value in payload["state_dicts"].items():
+            if key not in exclude_keys:
+                self.__dict__[key].load_state_dict(value, **kwargs)
+        for key in include_keys:
+            if key in payload["pickles"]:
+                self.__dict__[key] = dill.loads(payload["pickles"][key])
+
+    def load_checkpoint(
+        self, path=None, tag="latest", exclude_keys=None, include_keys=None, **kwargs
+    ):
+        if path is None:
+            path = self.get_checkpoint_path(tag=tag)
+        else:
+            path = pathlib.Path(path)
+        payload = torch.load(path.open("rb"), pickle_module=dill, **kwargs)
+        self.load_payload(payload, exclude_keys=exclude_keys, include_keys=include_keys)
+        return payload
+
+    def save_snapshot(self, tag="latest"):
+        """
+        Quick loading and saving for research, saves full state of the workspace.
+
+        However, loading a snapshot assumes the code stays exactly the same.
+        Use save_checkpoint for long-term storage.
+        """
+        path = pathlib.Path(self.output_dir).joinpath("snapshots", f"{tag}.pkl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self, path.open("wb"), pickle_module=dill)
+        return str(path.absolute())
+
+    @classmethod
+    def create_from_snapshot(cls, path):
+        return torch.load(open(path, "rb"), pickle_module=dill)
 
 
 @hydra.main(
