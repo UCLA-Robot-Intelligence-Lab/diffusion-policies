@@ -30,7 +30,6 @@ from torch.utils.data import DataLoader
 from diffusion_policy.unet_image_policy.unet_image_policy import (
     DiffusionUnetImagePolicy,
 )
-from shared.env.base_image_runner import BaseImageRunner
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
 from shared.utils.pytorch_util import dict_apply, optimizer_to
@@ -131,10 +130,9 @@ class TrainDiffusionUnetImageWorkspace:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
         # Configure environment runner
-        env_runner: BaseImageRunner = hydra.utils.instantiate(
+        env_runner = hydra.utils.instantiate(
             cfg.task.env_runner, output_dir=self.output_dir
         )
-        assert isinstance(env_runner, BaseImageRunner)
 
         # Configure logging with Weights & Biases
         wandb_run = wandb.init(

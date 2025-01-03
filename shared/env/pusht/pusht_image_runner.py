@@ -17,10 +17,9 @@ from shared.utils.gym.video_recording_wrapper import (
     VideoRecordingWrapper,
 )
 from shared.utils.pytorch_util import dict_apply
-from shared.env.base_image_runner import BaseImageRunner
 
 
-class PushTImageRunner(BaseImageRunner):
+class PushTImageRunner:
     def __init__(
         self,
         output_dir,
@@ -41,7 +40,7 @@ class PushTImageRunner(BaseImageRunner):
         tqdm_interval_sec=5.0,
         n_envs=None,
     ):
-        super().__init__(output_dir)
+        self.output_dir = output_dir
         if n_envs is None:
             n_envs = n_train + n_test
 
