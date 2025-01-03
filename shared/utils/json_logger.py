@@ -1,15 +1,10 @@
-"""
-This is taken from the Diffusion Policy authors implementation:
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/common/json_logger.py
-All credit goes to them.
-"""
-
-from typing import Optional, Callable, Any, Sequence
 import os
 import copy
 import json
 import numbers
 import pandas as pd
+
+from typing import Optional, Callable, Any, Sequence
 
 
 def read_json_log(

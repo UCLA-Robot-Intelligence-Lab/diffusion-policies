@@ -1,5 +1,6 @@
-from typing import Sequence, Optional
 import torch
+
+from typing import Sequence, Optional
 from torch import nn
 from shared.models.common.module_attr_mixin import ModuleAttrMixin
 
@@ -42,7 +43,7 @@ class LowdimMaskGenerator(ModuleAttrMixin):
         action_dim,
         obs_dim,
         # obs mask setup
-        max_num_obs_steps=2,
+        max_n_obs_steps=2,
         fix_obs_steps=True,
         # action mask
         action_visible=False,
@@ -50,7 +51,7 @@ class LowdimMaskGenerator(ModuleAttrMixin):
         super().__init__()
         self.action_dim = action_dim
         self.obs_dim = obs_dim
-        self.max_num_obs_steps = max_num_obs_steps
+        self.max_n_obs_steps = max_n_obs_steps
         self.fix_obs_steps = fix_obs_steps
         self.action_visible = action_visible
 
@@ -73,13 +74,11 @@ class LowdimMaskGenerator(ModuleAttrMixin):
 
         # generate obs mask
         if self.fix_obs_steps:
-            obs_steps = torch.full(
-                (B,), fill_value=self.max_num_obs_steps, device=device
-            )
+            obs_steps = torch.full((B,), fill_value=self.max_n_obs_steps, device=device)
         else:
             obs_steps = torch.randint(
                 low=1,
-                high=self.max_num_obs_steps + 1,
+                high=self.max_n_obs_steps + 1,
                 size=(B,),
                 generator=rng,
                 device=device,
@@ -112,7 +111,7 @@ class KeypointMaskGenerator(ModuleAttrMixin):
         action_dim,
         keypoint_dim,
         # obs mask setup
-        max_num_obs_steps=2,
+        max_n_obs_steps=2,
         fix_obs_steps=True,
         # keypoint mask setup
         keypoint_visible_rate=0.7,
@@ -126,7 +125,7 @@ class KeypointMaskGenerator(ModuleAttrMixin):
         self.action_dim = action_dim
         self.keypoint_dim = keypoint_dim
         self.context_dim = context_dim
-        self.max_num_obs_steps = max_num_obs_steps
+        self.max_n_obs_steps = max_n_obs_steps
         self.fix_obs_steps = fix_obs_steps
         self.keypoint_visible_rate = keypoint_visible_rate
         self.time_independent = time_independent
@@ -157,13 +156,11 @@ class KeypointMaskGenerator(ModuleAttrMixin):
 
         # generate obs mask
         if self.fix_obs_steps:
-            obs_steps = torch.full(
-                (B,), fill_value=self.max_num_obs_steps, device=device
-            )
+            obs_steps = torch.full((B,), fill_value=self.max_n_obs_steps, device=device)
         else:
             obs_steps = torch.randint(
                 low=1,
-                high=self.max_num_obs_steps + 1,
+                high=self.max_n_obs_steps + 1,
                 size=(B,),
                 generator=rng,
                 device=device,
@@ -240,4 +237,4 @@ def test():
     # kmg = KeypointMaskGenerator(2,2, random_obs_steps=True)
     # self = KeypointMaskGenerator(2,2,context_dim=2, action_visible=True)
     # self = KeypointMaskGenerator(2,2,context_dim=0, action_visible=True)
-    self = LowdimMaskGenerator(2, 20, max_num_obs_steps=3, action_visible=True)
+    self = LowdimMaskGenerator(2, 20, max_n_obs_steps=3, action_visible=True)

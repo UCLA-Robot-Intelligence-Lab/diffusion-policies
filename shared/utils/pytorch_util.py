@@ -1,7 +1,8 @@
-from typing import Dict, Callable, List
 import collections
 import torch
 import torch.nn as nn
+
+from typing import Dict, Callable, List
 
 
 def inspect_dict_structure(d, indent=0):
@@ -15,8 +16,6 @@ def inspect_dict_structure(d, indent=0):
             print("  " * indent + f"{key}: {type(value).__name__}")
 
 
-# Full credit for all of these utils goes to the Diffusion Policy authors
-# This file is taken directly from them, no changes. Many thanks :)
 def dict_apply(
     x: Dict[str, torch.Tensor], func: Callable[[torch.Tensor], torch.Tensor]
 ) -> Dict[str, torch.Tensor]:

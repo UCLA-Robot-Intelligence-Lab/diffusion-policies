@@ -3,22 +3,25 @@ import numpy as np
 import torch
 import collections
 import pathlib
+import tqdm
 import dill
 import math
 import wandb.sdk.data_types.video as wv
-import tqdm
 
 from shared.env.pusht.pusht_image_env import PushTImageEnv
 from shared.utils.gym.async_vector_env import AsyncVectorEnv
+from shared.utils.gym.sync_vector_env import SyncVectorEnv
 from shared.utils.gym.multistep_wrapper import MultiStepWrapper
 from shared.utils.gym.video_recording_wrapper import (
     VideoRecorder,
     VideoRecordingWrapper,
 )
 from shared.utils.pytorch_util import dict_apply
+from shared.env.base_image_runner import BaseImageRunner
+from diffusion_policy.base_image_policy import BaseImagePolicy
 
 
-class PushTImageRunner:
+class PushTImageRunner(BaseImageRunner):
     def __init__(
         self,
         output_dir,
@@ -30,8 +33,8 @@ class PushTImageRunner:
         legacy_test=False,
         test_start_seed=10000,
         max_steps=200,
-        num_obs_steps=8,
-        num_action_steps=8,
+        n_obs_steps=8,
+        n_action_steps=8,
         fps=10,
         crf=22,
         render_size=96,
@@ -39,7 +42,7 @@ class PushTImageRunner:
         tqdm_interval_sec=5.0,
         n_envs=None,
     ):
-        self.output_dir = output_dir
+        super().__init__(output_dir)
         if n_envs is None:
             n_envs = n_train + n_test
 
@@ -60,8 +63,8 @@ class PushTImageRunner:
                     file_path=None,
                     steps_per_render=steps_per_render,
                 ),
-                num_obs_steps=num_obs_steps,
-                num_action_steps=num_action_steps,
+                n_obs_steps=n_obs_steps,
+                n_action_steps=n_action_steps,
                 max_episode_steps=max_steps,
             )
 
@@ -123,7 +126,7 @@ class PushTImageRunner:
             env_prefixs.append("test/")
             env_init_fn_dills.append(dill.dumps(init_fn))
 
-        env = AsyncVectorEnv(env_fns, shared_memory=False)
+        env = AsyncVectorEnv(env_fns)
 
         # test env
         # env.reset(seed=env_seeds)
@@ -138,13 +141,13 @@ class PushTImageRunner:
         self.env_init_fn_dills = env_init_fn_dills
         self.fps = fps
         self.crf = crf
-        self.num_obs_steps = num_obs_steps
-        self.num_action_steps = num_action_steps
+        self.n_obs_steps = n_obs_steps
+        self.n_action_steps = n_action_steps
         self.past_action = past_action
         self.max_steps = max_steps
         self.tqdm_interval_sec = tqdm_interval_sec
 
-    def run(self, policy):
+    def run(self, policy: BaseImagePolicy):
         device = policy.device
         dtype = policy.dtype
         env = self.env
@@ -192,7 +195,7 @@ class PushTImageRunner:
                 if self.past_action and (past_action is not None):
                     # TODO: not tested
                     np_obs_dict["past_action"] = past_action[
-                        :, -(self.num_obs_steps - 1) :
+                        :, -(self.n_obs_steps - 1) :
                     ].astype(np.float32)
 
                 # device transfer

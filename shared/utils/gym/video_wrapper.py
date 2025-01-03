@@ -1,9 +1,3 @@
-"""
-This file is taken from the Diffusion Policy authors original implementation.
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/gym_util/video_wrapper.py
-All credit goes to them.
-"""
-
 import gym
 import numpy as np
 

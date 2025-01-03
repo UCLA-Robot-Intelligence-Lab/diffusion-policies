@@ -1,9 +1,3 @@
-"""
-This file is from the Diffusion Policy authors implementation
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/model/common/lr_scheduler.py
-All credit goes to them
-"""
-
 from diffusers.optimization import (
     Union,
     SchedulerType,

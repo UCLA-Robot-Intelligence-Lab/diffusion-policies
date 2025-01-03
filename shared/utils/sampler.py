@@ -1,9 +1,3 @@
-"""
-This file is from the Diffusion Policy authors original implementation.
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/common/sampler.py
-All credit goes to them.
-"""
-
 import numpy as np
 import numba
 

@@ -1,15 +1,17 @@
-"""
-A collection of utilities for working with nested tensor structures consisting
-of numpy arrays and torch tensors.
-
-I took this file from the Diffusion Policy authors original implementation
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/model/common/tensor_util.py
-All credit goes to them
-"""
-
 import collections
 import numpy as np
 import torch
+
+
+def inspect_dict_structure(d, indent=0):
+    for key, value in d.items():
+        if isinstance(value, dict):
+            print("  " * indent + f"{key}: <dict>")
+            inspect_dict_structure(value, indent + 1)
+        elif isinstance(value, torch.Tensor):
+            print("  " * indent + f"{key}: <Tensor, shape={tuple(value.shape)}>")
+        else:
+            print("  " * indent + f"{key}: {type(value).__name__}")
 
 
 def recursive_dict_list_tuple_apply(x, type_func_dict):

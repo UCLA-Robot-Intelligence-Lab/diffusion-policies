@@ -1,14 +1,5 @@
-"""
-This file is from the Diffusion Policy authors original implementation
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/model/diffusion/ema_model.py
-All credit goes to them
-
-To be honest, I'm not sure where this comes from. Or how exactly it works?
-"""
-
 import copy
 import torch
-
 from torch.nn.modules.batchnorm import _BatchNorm
 
 

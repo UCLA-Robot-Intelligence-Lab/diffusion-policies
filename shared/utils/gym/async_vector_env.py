@@ -1,14 +1,3 @@
-"""
-This file is taken from the Diffusion Policy authors original implementation.
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/gym_util/async_vector_env.py
-All credit goes to them.
-
-(comment from original repository)
-Back ported methods: call, set_attr from v0.26
-Disabled auto-reset after done
-Added render method.
-"""
-
 import numpy as np
 import time
 import multiprocessing as mp

@@ -4,9 +4,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from typing import Union, Dict
 from shared.utils.pytorch_util import dict_apply
 from shared.models.common.dict_of_tensor_mixin import DictOfTensorMixin
-from typing import Union, Dict
 
 
 class LinearNormalizer(DictOfTensorMixin):
@@ -47,10 +47,6 @@ class LinearNormalizer(DictOfTensorMixin):
                 range_eps=range_eps,
                 fit_offset=fit_offset,
             )
-        print(self.params_dict)
-
-    def get_params(self):
-        return self.params_dict
 
     def __call__(self, x: Union[Dict, torch.Tensor, np.ndarray]) -> torch.Tensor:
         return self.normalize(x)
@@ -373,8 +369,3 @@ def test():
     dataun = n.unnormalize(datan)
     for key in data:
         assert torch.allclose(data[key], dataun[key], atol=1e-4)
-
-
-if __name__ == "__main__":
-    test()
-    print("All tests passed")

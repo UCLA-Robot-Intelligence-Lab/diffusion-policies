@@ -1,11 +1,6 @@
-"""
-This file is from the Diffusion Policy authors original implementation
-https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/common/normalize_util.py
-All credit goes to them.
-"""
-
 import numpy as np
 import torch
+
 from shared.models.common.normalizer import SingleFieldLinearNormalizer
 from shared.utils.pytorch_util import dict_apply, dict_apply_reduce, dict_apply_split
 
