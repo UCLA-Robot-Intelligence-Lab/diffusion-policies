@@ -157,6 +157,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         device = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype
         print("Getting params dict: ", self.normalizer.get_params())
+        """
         flat_num_obs = dict_apply(num_obs, lambda x: x.reshape(-1, *x.shape[2:]))
 
         num_obs_features = self.obs_encoder(flat_num_obs).reshape(B, To, -1)
@@ -190,6 +191,34 @@ class UnetImageDiffusionPolicy(nn.Module):
         print("action mean??: ", action.mean())
         print("action_pred mean??: ", action_pred.mean())
         return temp_res
+        """
+        local_cond = None
+        global_cond = None
+        if self.obs_as_global_cond:
+            this_nobs = dict_apply(
+                num_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
+            )
+            nobs_features = self.obs_encoder(this_nobs)
+            global_cond = nobs_features.reshape(B, -1)
+            cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
+            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
+        else:
+            print("MISSING??")
+            raise ValueError
+
+        nsample = self.conditional_sample(cond_data, cond_mask, local_cond, global_cond)
+        # print("\n\n\n\n\n")
+        # print("NSAMPLE MEAN: ", nsample.mean())
+        # print("\n\n\n\n\n")
+        naction_pred = nsample[..., :Da]
+        action_pred = self.normalizer["action"].unnormalize(naction_pred)
+
+        start = To - 1
+        end = start + self.num_action_steps
+        action = action_pred[:, start:end]
+
+        result = {"action": action, "action_pred": action_pred}
+        return result
 
     def compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """

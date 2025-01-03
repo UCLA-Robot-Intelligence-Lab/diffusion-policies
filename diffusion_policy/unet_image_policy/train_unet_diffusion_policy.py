@@ -242,7 +242,20 @@ class TrainUnetImageDiffusionPolicy:
                         )
                         if train_sampling_batch is None:
                             train_sampling_batch = copy.deepcopy(batch)
-
+                            CHECK = (train_sampling_batch["action"].mean(),)
+                            print("\n\n\n\n\n")
+                            print(
+                                "Sampling batch action shape:",
+                                train_sampling_batch["action"].shape,
+                            )
+                            print(
+                                "Sampling batch action mean :",
+                                train_sampling_batch["action"].mean(),
+                            )
+                            print(
+                                "sample_0: ", train_sampling_batch["action"][0].mean()
+                            )
+                            print("\n\n\n\n\n")
                         # Compute loss
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
@@ -347,9 +360,19 @@ class TrainUnetImageDiffusionPolicy:
 
                         mse_error = torch.nn.functional.mse_loss(pred_action, gt_action)
                         print("\n\n\n\n\n")
+                        print("pred_action mean: ", pred_action.mean())
+                        print("gt_action mean: ", gt_action.mean())
+                        print("CHECK: ", CHECK)
                         print("\nmse error: ", mse_error, "\n")
                         print("\n\n\n\n\n")
                         step_log["train_action_mse_error"] = mse_error.item()
+                        # why?
+                        del batch
+                        del obs_dict
+                        del gt_action
+                        del result
+                        del pred_action
+                        del mse_error
 
                 # -- CHECKPOINTING --
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
