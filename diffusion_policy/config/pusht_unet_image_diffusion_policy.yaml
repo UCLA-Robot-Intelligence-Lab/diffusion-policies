@@ -96,7 +96,7 @@ training:
   device: "cuda:0"
   seed: 42
   debug: False
-  resume: True
+  resume: False # for now
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 500
@@ -106,7 +106,7 @@ training:
   # replace BatchNorm with GroupNorm.
   use_ema: True
   freeze_encoder: True
-  # training loop control
+
   # in epochs
   rollout_every: 50
   checkpoint_every: 50
@@ -120,7 +120,7 @@ training:
 
 logging:
   project: diffusion_policy_debug
-  resume: True
+  resume: False # for now
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
   tags: ["${name}", "${task_name}", "${exp_name}"]

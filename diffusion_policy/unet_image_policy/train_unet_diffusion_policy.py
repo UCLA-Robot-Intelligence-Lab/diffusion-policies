@@ -346,6 +346,9 @@ class TrainUnetImageDiffusionPolicy:
                         pred_action = result["action_pred"]
 
                         mse_error = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        print("\n\n\n\n\n")
+                        print("\nmse error: ", mse_error, "\n")
+                        print("\n\n\n\n\n")
                         step_log["train_action_mse_error"] = mse_error.item()
 
                 # -- CHECKPOINTING --
