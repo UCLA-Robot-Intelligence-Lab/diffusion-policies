@@ -30,7 +30,6 @@ from torch.utils.data import DataLoader
 from diffusion_policy.unet_image_policy.unet_image_policy import (
     DiffusionUnetImagePolicy,
 )
-from shared.env.base_dataset import BaseImageDataset
 from shared.env.base_image_runner import BaseImageRunner
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
@@ -104,8 +103,7 @@ class TrainDiffusionUnetImageWorkspace:
                 self.load_checkpoint(path=latest_ckpt_path)
 
         # Configure dataset
-        dataset: BaseImageDataset = hydra.utils.instantiate(cfg.task.dataset)
-        assert isinstance(dataset, BaseImageDataset)
+        dataset = hydra.utils.instantiate(cfg.task.dataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 

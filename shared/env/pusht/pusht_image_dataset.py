@@ -3,15 +3,15 @@ import numpy as np
 import copy
 
 from typing import Dict
+from torch.utils.data import Dataset
 from shared.utils.pytorch_util import dict_apply
 from shared.models.common.normalizer import LinearNormalizer
 from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
-from shared.env.base_dataset import BaseImageDataset
 from shared.utils.normalize_util import get_image_range_normalizer
 
 
-class PushTImageDataset(BaseImageDataset):
+class PushTImageDataset(Dataset):
     def __init__(
         self,
         zarr_path,
@@ -46,6 +46,9 @@ class PushTImageDataset(BaseImageDataset):
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
+
+    def __len__(self) -> int:
+        return 0
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
