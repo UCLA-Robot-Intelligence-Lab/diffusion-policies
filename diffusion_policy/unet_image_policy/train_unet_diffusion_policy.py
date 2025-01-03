@@ -363,6 +363,7 @@ class TrainUnetImageDiffusionPolicy:
                         print("pred_action mean: ", pred_action.mean())
                         print("gt_action mean: ", gt_action.mean())
                         print("CHECK: ", CHECK)
+                        print(policy.debug())
                         print("\nmse error: ", mse_error, "\n")
                         print("\n\n\n\n\n")
                         step_log["train_action_mse_error"] = mse_error.item()

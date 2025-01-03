@@ -152,7 +152,7 @@ def get_resnet18(
 
         model.spatial_softmax = SpatialSoftArgmax(normalize=True)
         model.fc = nn.Linear(
-            1024, num_classes
+            512, num_classes
         )  # need to resize to handle spatial_softmax
 
         def forward(x):
@@ -166,7 +166,7 @@ def get_resnet18(
             x = model.layer3(x)
             x = model.layer4(x)
 
-            x = model.spatial_softmax(x)  # Replace GAP
+            x = torch.mean(x, dim=[2, 3])
             x = model.fc(x)
             return x
 

@@ -45,15 +45,15 @@ class UnetImageDiffusionPolicy(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        print("Entering __init__")
+        # print("Entering __init__")
         action_shape = shape_meta["action"]["shape"]
         assert len(action_shape) == 1, "Action shape must be 1-dimensional."
-        inspect_dict_structure(shape_meta)
-        print("shape meta: ", shape_meta)
+        # inspect_dict_structure(shape_meta)
+        # print("shape meta: ", shape_meta)
         self.action_dim = action_shape[0]
 
         self.obs_feature_dim = obs_encoder.output_shape()[0]
-        print("obs_feature_dim: ", self.obs_feature_dim)
+        # print("obs_feature_dim: ", self.obs_feature_dim)
         input_dim = self.action_dim + self.obs_feature_dim
         global_cond_dim = None
         if obs_as_global_cond:
@@ -94,7 +94,9 @@ class UnetImageDiffusionPolicy(nn.Module):
         self.num_inference_steps = (
             num_inference_steps or noise_scheduler.config.num_train_timesteps
         )
-        print("Exiting __init__")
+        self.debug_conditional_sample = None
+        self.debug_predict_action = None
+        # print("Exiting __init__")
 
     @property
     def device(self):
@@ -114,14 +116,14 @@ class UnetImageDiffusionPolicy(nn.Module):
         **kwargs,  # keyword arguments passed to .step
     ) -> torch.Tensor:
         # TODO: Update with dimension keys
-        print("Enteriing conditional_sample")
+        # print("Enteriing conditional_sample")
         trajectory = torch.randn(
             condition_data_BTD.shape,
             dtype=condition_data_BTD.dtype,
             device=condition_data_BTD.device,
             generator=generator,
         )
-        print("trajectory shape: ", trajectory.shape)
+        # print("trajectory shape: ", trajectory.shape)
 
         self.noise_scheduler.set_timesteps(self.num_inference_steps)
 
@@ -141,13 +143,22 @@ class UnetImageDiffusionPolicy(nn.Module):
             ).prev_sample
 
         trajectory[condition_mask_BTD] = condition_data_BTD[condition_mask_BTD]
-        print("Exiting conditional_sample, trajectory shape: ", trajectory.shape)
+
+        self.debug_conditional_sample = [
+            trajectory.shape,
+            trajectory.mean(),
+            condition_data_BTD.mean(),
+            condition_mask_BTD[0],
+            global_cond_BC.shape,
+        ]
+
+        # print("Exiting conditional_sample, trajectory shape: ", trajectory.shape)
         return trajectory
 
     def predict_action(
         self, obs_dict: Dict[str, torch.Tensor]
     ) -> Dict[str, torch.Tensor]:
-        print("Entering predict_action")
+        # print("Entering predict_action")
         num_obs = self.normalizer.normalize(obs_dict)
 
         B, To = list(num_obs.values())[0].shape[:2]
@@ -156,7 +167,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         Do = self.obs_feature_dim
         device = next(self.model.parameters()).device
         dtype = next(self.model.parameters()).dtype
-        print("Getting params dict: ", self.normalizer.get_params())
+        # print("Getting params dict: ", self.normalizer.get_params())
         """
         flat_num_obs = dict_apply(num_obs, lambda x: x.reshape(-1, *x.shape[2:]))
 
@@ -198,7 +209,7 @@ class UnetImageDiffusionPolicy(nn.Module):
             this_nobs = dict_apply(
                 num_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
             )
-            nobs_features = self.obs_encoder(this_nobs)
+            nobs_features = self.obs_encoder(this_nobs)  # ISSUE HERE!!
             global_cond = nobs_features.reshape(B, -1)
             cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
@@ -211,14 +222,77 @@ class UnetImageDiffusionPolicy(nn.Module):
         # print("NSAMPLE MEAN: ", nsample.mean())
         # print("\n\n\n\n\n")
         naction_pred = nsample[..., :Da]
+        pre_naction_pred_shape = naction_pred.shape
+        pre_naction_pred_mean = naction_pred.mean()
+        # something is going wrong in the normalizer?
         action_pred = self.normalizer["action"].unnormalize(naction_pred)
 
         start = To - 1
         end = start + self.num_action_steps
         action = action_pred[:, start:end]
-
+        # grab = inspect_dict_structure(this_nobs)
         result = {"action": action, "action_pred": action_pred}
+        self.debug_predict_action = [
+            action.shape,
+            action.mean(),
+            action_pred.shape,
+            action_pred.mean(),
+            naction_pred.shape,
+            naction_pred.mean(),
+            nsample.shape,
+            nsample.mean(),
+            nobs_features.shape,
+            nobs_features.mean(),
+            cond_data.shape,
+            cond_data.mean(),
+            cond_mask.shape,
+            cond_mask[0],
+            pre_naction_pred_shape,
+            pre_naction_pred_mean,
+            this_nobs,
+            num_obs,
+        ]
         return result
+
+    def debug(self):
+        # Debug method, save us all
+        print("\n\n\n")
+        print("Debugging INIT:")
+        print("action_dim: ", self.action_dim)
+        print("obs_feature_dim: ", self.obs_feature_dim)
+        print("horizon: ", self.horizon)
+        print("num_action_steps: ", self.num_action_steps)
+        print("num_obs_steps: ", self.num_obs_steps)
+        print("obs_as_global_cond: ", self.obs_as_global_cond)
+        print("num_inference_steps: ", self.num_inference_steps)
+        print("\n")
+        print("Debugging conditional_sample:")
+        print("trajectory shape: ", self.debug_conditional_sample[0])
+        print("trajectory mean: ", self.debug_conditional_sample[1])
+        print("cond_data mean: ", self.debug_conditional_sample[2])
+        print("cond mask 0: ", self.debug_conditional_sample[3])
+        print("global cond shape: ", self.debug_conditional_sample[4])
+        print("\n")
+        print("Debugging predict_action:")
+        print("action shape: ", self.debug_predict_action[0])
+        print("action mean: ", self.debug_predict_action[1])
+        print("action_pred shape: ", self.debug_predict_action[2])
+        print("action_pred mean: ", self.debug_predict_action[3])
+        print("naction_pred shape: ", self.debug_predict_action[4])
+        print("naction_pred mean: ", self.debug_predict_action[5])
+        print("nsample shape: ", self.debug_predict_action[6])
+        print("nsample mean: ", self.debug_predict_action[7])
+        print("nobs_features shape: ", self.debug_predict_action[8])
+        print("nobs_features mean: ", self.debug_predict_action[9])
+        print("cond data shape: ", self.debug_predict_action[10])
+        print("cond data mean: ", self.debug_predict_action[11])
+        print("cond mask shape: ", self.debug_predict_action[12])
+        print("cond mask 0: ", self.debug_predict_action[13])
+        print("prenaction shape: ", self.debug_predict_action[14])
+        print("prenaction mean: ", self.debug_predict_action[15])
+        print("this_nobs: ", inspect_dict_structure(self.debug_predict_action[16]))
+        print("num_obs: ", inspect_dict_structure(self.debug_predict_action[17]))
+        print("\n\n\n")
 
     def compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
@@ -287,7 +361,7 @@ class UnetImageDiffusionPolicy(nn.Module):
         cond_data = trajectory
 
         if self.obs_as_global_cond:
-            print("in self.obs_as_global_cond (true)")
+            # print("in self.obs_as_global_cond (true)")
             this_nobs = dict_apply(
                 nobs,
                 lambda x: x[:, : self.num_obs_steps, ...].reshape(-1, *x.shape[2:]),
@@ -295,14 +369,14 @@ class UnetImageDiffusionPolicy(nn.Module):
             nobs_features = self.obs_encoder(this_nobs)
             global_cond = nobs_features.reshape(batch_size, -1)
         else:
-            print("in self.obs_as_global_cond (false)")
+            # print("in self.obs_as_global_cond (false)")
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
             cond_data = torch.cat([nactions, nobs_features], dim=-1)
             trajectory = cond_data.detach()
 
         condition_mask = self.mask_generator(trajectory.shape)
-        print("condition_mask: ", condition_mask.shape)
+        # print("condition_mask: ", condition_mask.shape)
 
         noise = torch.randn(trajectory.shape, device=trajectory.device)
         bsz = trajectory.shape[0]
@@ -333,12 +407,12 @@ class UnetImageDiffusionPolicy(nn.Module):
             raise ValueError(f"Unsupported prediction_type {pred_type}")
 
         loss = F.mse_loss(pred, target, reduction="none")
-        print("loss before mask: ", loss.mean())
+        # print("loss before mask: ", loss.mean())
         loss_mask = loss_mask.to(loss.device)
         loss = loss * loss_mask.type(loss.dtype)
         loss = reduce(loss, "b ... -> b (...)", "mean")
         loss = loss.mean()
-        print("loss after mask: ", loss)
+        # print("loss after mask: ", loss)
         return loss
 
     def set_normalizer(self, normalizer: LinearNormalizer):
@@ -349,8 +423,8 @@ class UnetImageDiffusionPolicy(nn.Module):
             normalizer: A pre-initialized LinearNormalizer.
         """
         self.normalizer.load_state_dict(normalizer.state_dict())
-        print("normalizer state dict(): ", normalizer.state_dict())
-        print("normalizer param dict: ", self.normalizer.get_params())
+        # print("normalizer state dict(): ", normalizer.state_dict())
+        # print("normalizer param dict: ", self.normalizer.get_params())
 
     def output_shape(self) -> Tuple[int, ...]:
         """
