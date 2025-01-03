@@ -1,3 +1,4 @@
+# python train_unet_diffusion_policy.py --config-path=../config --config-name=pusht_unet_image_diffusion_policy training.resume=False
 # If running this script directly, set up environment paths first
 if __name__ == "__main__":
     import sys
@@ -339,7 +340,9 @@ class TrainUnetImageDiffusionPolicy:
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
 
+                        # this has to be wrong.
                         result = policy.predict_action(obs_dict)
+                        # we know this is correct (pred_action)
                         pred_action = result["action_pred"]
 
                         mse_error = torch.nn.functional.mse_loss(pred_action, gt_action)

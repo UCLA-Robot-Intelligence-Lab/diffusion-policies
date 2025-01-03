@@ -50,7 +50,7 @@ class ResnetBlock(nn.Module):
 
 
 class ResNet18(nn.Module):
-    def __init__(self, block, layers, num_classes=1000):
+    def __init__(self, block, layers, num_classes=512):
         super(ResNet18, self).__init__()
         self.inp_channels = 64
 
@@ -129,7 +129,7 @@ def replace_bn_with_gn(model):
 
 # TODO: Update parameters better here, name and weights are not being used
 def get_resnet18(
-    name="resnet18", weights="IMAGENET1K_V1", num_classes=1000, pretrained=True
+    name="resnet18", weights="IMAGENET1K_V1", num_classes=512, pretrained=True
 ):
     encoders_dir = os.path.dirname(os.path.abspath(__file__))
     weights_dir = os.path.join(encoders_dir, "weights")

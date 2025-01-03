@@ -4,6 +4,17 @@ import torch
 import torch.nn as nn
 
 
+def inspect_dict_structure(d, indent=0):
+    for key, value in d.items():
+        if isinstance(value, dict):
+            print("  " * indent + f"{key}: <dict>")
+            inspect_dict_structure(value, indent + 1)
+        elif isinstance(value, torch.Tensor):
+            print("  " * indent + f"{key}: <Tensor, shape={tuple(value.shape)}>")
+        else:
+            print("  " * indent + f"{key}: {type(value).__name__}")
+
+
 # Full credit for all of these utils goes to the Diffusion Policy authors
 # This file is taken directly from them, no changes. Many thanks :)
 def dict_apply(
