@@ -2,7 +2,7 @@
 Diffusion Policy and other generative model policies
 
 ### Credit
-The implementations here are not necessarily original. Please reference the original repositories and literature, linked below!
+The implementations here are not necessarily original. Please reference the original repositories (linked below) literature (cited at the bottom)!
 - [Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
 
 ### Shape Suffixes and Dimension  Key
