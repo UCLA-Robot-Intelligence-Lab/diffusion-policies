@@ -154,8 +154,8 @@ class DiffusionUnetImagePolicy(nn.Module):
             model_output = model(
                 trajectory_BTF,
                 t,
-                local_cond_BTL=local_cond_BTL,
-                global_cond_BG=global_cond_BG,
+                local_cond=local_cond_BTL,
+                global_cond=global_cond_BG,
             )
 
             # 3. compute previous observation: x_t -> x_t-1
@@ -297,8 +297,8 @@ class DiffusionUnetImagePolicy(nn.Module):
         pred = self.model(
             noisy_trajectory,
             timesteps,
-            local_cond_BTL=local_cond_BTL,
-            global_cond_BG=global_cond_BG,
+            local_cond=local_cond_BTL,
+            global_cond=global_cond_BG,
         )
 
         pred_type = self.noise_scheduler.config.prediction_type
