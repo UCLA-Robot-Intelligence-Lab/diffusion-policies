@@ -96,21 +96,25 @@ class DiffusionUnetImagePolicy(nn.Module):
     # ========= inference  ============
     def conditional_sample(
         self,
-        condition_data,
-        condition_mask,
+        condition_data_BTL,
+        condition_mask_BTL,
         local_cond=None,
         global_cond=None,
         generator=None,
-        # keyword arguments to scheduler.step
         **kwargs,
     ):
+        """
+        args:
+            condition_data_BTL : [ B, T, L ]
+            condition_mask_BTL : [ B, T, L ]
+        """
         model = self.model
         scheduler = self.noise_scheduler
 
         trajectory = torch.randn(
-            size=condition_data.shape,
-            dtype=condition_data.dtype,
-            device=condition_data.device,
+            size=condition_data_BTL.shape,
+            dtype=condition_data_BTL.dtype,
+            device=condition_data_BTL.device,
             generator=generator,
         )
 
@@ -119,7 +123,7 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         for t in scheduler.timesteps:
             # 1. apply conditioning
-            trajectory[condition_mask] = condition_data[condition_mask]
+            trajectory[condition_mask_BTL] = condition_data_BTL[condition_mask_BTL]
 
             # 2. predict model output
             model_output = model(
@@ -132,7 +136,7 @@ class DiffusionUnetImagePolicy(nn.Module):
             ).prev_sample
 
         # finally make sure conditioning is enforced
-        trajectory[condition_mask] = condition_data[condition_mask]
+        trajectory[condition_mask_BTL] = condition_data_BTL[condition_mask_BTL]
 
         return trajectory
 
@@ -143,7 +147,6 @@ class DiffusionUnetImagePolicy(nn.Module):
         obs_dict: must include "obs" key
         result: must include "action" key
         """
-        assert "past_action" not in obs_dict  # not implemented yet
         # normalize input
         nobs = self.normalizer.normalize(obs_dict)
         value = next(iter(nobs.values()))
@@ -240,7 +243,7 @@ class DiffusionUnetImagePolicy(nn.Module):
             trajectory = cond_data.detach()
 
         # generate impainting mask
-        condition_mask = self.mask_generator(trajectory.shape)
+        condition_mask_BTL = self.mask_generator(trajectory.shape)
 
         # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
@@ -257,10 +260,10 @@ class DiffusionUnetImagePolicy(nn.Module):
         noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
 
         # compute loss mask
-        loss_mask = ~condition_mask
+        loss_mask = ~condition_mask_BTL
 
         # apply conditioning
-        noisy_trajectory[condition_mask] = cond_data[condition_mask]
+        noisy_trajectory[condition_mask_BTL] = cond_data[condition_mask_BTL]
 
         # Predict the noise residual
         pred = self.model(

@@ -5,6 +5,20 @@ import torch.nn as nn
 from typing import Dict, Callable, List
 
 
+def copy_to_cpu(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().to("cpu")
+    elif isinstance(x, dict):
+        result = dict()
+        for k, v in x.items():
+            result[k] = _copy_to_cpu(v)
+        return result
+    elif isinstance(x, list):
+        return [_copy_to_cpu(k) for k in x]
+    else:
+        return copy.deepcopy(x)
+
+
 def inspect_dict_structure(d, indent=0):
     for key, value in d.items():
         if isinstance(value, dict):

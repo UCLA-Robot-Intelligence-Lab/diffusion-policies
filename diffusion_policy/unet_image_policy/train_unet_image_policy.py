@@ -1,3 +1,5 @@
+# python train_unet_diffusion_policy.py --config-path=../config --config-name=pusht_unet_image_diffusion_policy
+
 if __name__ == "__main__":
     import sys
     import os
@@ -32,25 +34,11 @@ from diffusion_policy.unet_image_policy.unet_image_policy import (
 )
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
-from shared.utils.pytorch_util import dict_apply, optimizer_to
+from shared.utils.pytorch_util import dict_apply, optimizer_to, copy_to_cpu
 from shared.models.unet.ema_model import EMAModel
 from shared.models.common.lr_scheduler import get_scheduler
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
-
-
-def _copy_to_cpu(x):
-    if isinstance(x, torch.Tensor):
-        return x.detach().to("cpu")
-    elif isinstance(x, dict):
-        result = dict()
-        for k, v in x.items():
-            result[k] = _copy_to_cpu(v)
-        return result
-    elif isinstance(x, list):
-        return [_copy_to_cpu(k) for k in x]
-    else:
-        return copy.deepcopy(x)
 
 
 class TrainDiffusionUnetImageWorkspace:
@@ -349,7 +337,7 @@ class TrainDiffusionUnetImageWorkspace:
                 # Modules, optimizers, etc.
                 if key not in exclude_keys:
                     if use_thread:
-                        payload["state_dicts"][key] = _copy_to_cpu(value.state_dict())
+                        payload["state_dicts"][key] = copy_to_cpu(value.state_dict())
                     else:
                         payload["state_dicts"][key] = value.state_dict()
             elif key in include_keys:
