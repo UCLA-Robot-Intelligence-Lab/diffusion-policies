@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from typing import Dict, Optional
-from einops import rearrange, reduce
+from einops import reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from shared.models.common.normalizer import LinearNormalizer
@@ -37,7 +37,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         n_action_steps,
         n_obs_steps,
         num_inference_steps=None,
-        obs_as_global_cond_BG=True,
+        obs_as_global_cond=True,
         diffusion_step_embed_dim=256,
         down_dims=(256, 512, 1024),
         kernel_size=5,
@@ -58,7 +58,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         # create diffusion model
         input_dim = action_dim + obs_feature_dim
         global_cond_dim = None
-        if obs_as_global_cond_BG:
+        if obs_as_global_cond:
             input_dim = action_dim
             global_cond_dim = obs_feature_dim * n_obs_steps
 
@@ -78,7 +78,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         self.noise_scheduler = noise_scheduler
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
-            obs_dim=0 if obs_as_global_cond_BG else obs_feature_dim,
+            obs_dim=0 if obs_as_global_cond else obs_feature_dim,
             max_n_obs_steps=n_obs_steps,
             fix_obs_steps=True,
             action_visible=False,
@@ -89,9 +89,8 @@ class DiffusionUnetImagePolicy(nn.Module):
         self.action_dim = action_dim
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
-        self.obs_as_global_cond_BG = obs_as_global_cond_BG
+        self.obs_as_global_cond = obs_as_global_cond
         self.kwargs = kwargs
-
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
@@ -122,7 +121,7 @@ class DiffusionUnetImagePolicy(nn.Module):
             condition_data_BTF : [ B, T, F ] Conditioning data that we want the final sampled
                                              trajectory to represent. These are *known* values
                                              for time steps and features in the trajectory.
-            condition_mask_BTF : [ B, T, F ] Mask that we apply on our condition data. Where true,
+            condition_mask_BTF : [ B, T, F ] Mask that we apply on our condition data. Where True,
                                              we should overwrite our predicted trajectory since we
                                              know these values.
             local_cond_BTL : [ B, T, L ] Temporal context: conditioning specific to each timestep
@@ -146,7 +145,7 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         noise_scheduler.set_timesteps(num_inference_steps)
 
-        for t in scheduler.timesteps:
+        for t in noise_scheduler.timesteps:
             # 1. Apply conditioning
             trajectory_BTF[condition_mask_BTF] = condition_data_BTF[condition_mask_BTF]
 
@@ -158,7 +157,7 @@ class DiffusionUnetImagePolicy(nn.Module):
                 global_cond=global_cond_BG,
             )
 
-            # 3. compute previous observation: x_t -> x_t-1
+            # 3. Compute previous observation: x_t -> x_t-1
             trajectory_BTF = noise_scheduler.step(
                 model_output, t, trajectory_BTF, generator=generator, **kwargs
             ).prev_sample
@@ -191,7 +190,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         # handle different ways of passing observation
         local_cond_BTL = None
         global_cond_BG = None
-        if self.obs_as_global_cond_BG:
+        if self.obs_as_global_cond:
             # condition through global feature
             this_nobs = dict_apply(
                 nobs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
@@ -253,7 +252,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         global_cond_BG = None
         trajectory = nactions
         cond_data = trajectory
-        if self.obs_as_global_cond_BG:
+        if self.obs_as_global_cond:
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(
                 nobs, lambda x: x[:, : self.n_obs_steps, ...].reshape(-1, *x.shape[2:])

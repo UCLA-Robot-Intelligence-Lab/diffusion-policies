@@ -1,6 +1,7 @@
 import collections
 import torch
 import torch.nn as nn
+import copy
 
 from typing import Dict, Callable, List
 
@@ -11,10 +12,10 @@ def copy_to_cpu(x):
     elif isinstance(x, dict):
         result = dict()
         for k, v in x.items():
-            result[k] = _copy_to_cpu(v)
+            result[k] = copy_to_cpu(v)
         return result
-    elif isinstanxce(x, list):
-        return [_copy_to_cpu(k) for k in x]
+    elif isinstance(x, list):
+        return [copy_to_cpu(k) for k in x]
     else:
         return copy.deepcopy(x)
 
