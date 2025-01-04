@@ -5,6 +5,7 @@ if __name__ == "__main__":
     import os
     import pathlib
 
+    print("Sys path: ", sys.path)
     ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
     sys.path.append(ROOT_DIR)
     os.chdir(ROOT_DIR)

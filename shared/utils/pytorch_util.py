@@ -13,7 +13,7 @@ def copy_to_cpu(x):
         for k, v in x.items():
             result[k] = _copy_to_cpu(v)
         return result
-    elif isinstance(x, list):
+    elif isinstanxce(x, list):
         return [_copy_to_cpu(k) for k in x]
     else:
         return copy.deepcopy(x)

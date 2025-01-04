@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Dict
+from typing import Dict, Optional
 from einops import rearrange, reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
@@ -11,6 +11,20 @@ from shared.models.unet.conditional_unet1d import ConditionalUnet1D
 from shared.models.common.mask_generator import LowdimMaskGenerator
 from shared.vision.common.multi_image_obs_encoder import MultiImageObsEncoder
 from shared.utils.pytorch_util import dict_apply
+
+"""
+Selected Dimension Keys:
+
+B: batch size
+T: prediction horizon
+    To: observation horizon
+    Ta: action horizon
+F: feature dimension
+    Fo: observation feature dimension
+    Fa: action feature dimension
+G: global conditioning dimension
+L: local conditioning dimension
+"""
 
 
 class DiffusionUnetImagePolicy(nn.Module):
@@ -23,7 +37,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         n_action_steps,
         n_obs_steps,
         num_inference_steps=None,
-        obs_as_global_cond=True,
+        obs_as_global_cond_BG=True,
         diffusion_step_embed_dim=256,
         down_dims=(256, 512, 1024),
         kernel_size=5,
@@ -44,7 +58,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         # create diffusion model
         input_dim = action_dim + obs_feature_dim
         global_cond_dim = None
-        if obs_as_global_cond:
+        if obs_as_global_cond_BG:
             input_dim = action_dim
             global_cond_dim = obs_feature_dim * n_obs_steps
 
@@ -64,7 +78,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         self.noise_scheduler = noise_scheduler
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
-            obs_dim=0 if obs_as_global_cond else obs_feature_dim,
+            obs_dim=0 if obs_as_global_cond_BG else obs_feature_dim,
             max_n_obs_steps=n_obs_steps,
             fix_obs_steps=True,
             action_visible=False,
@@ -75,7 +89,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         self.action_dim = action_dim
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
-        self.obs_as_global_cond = obs_as_global_cond
+        self.obs_as_global_cond_BG = obs_as_global_cond_BG
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -93,52 +107,66 @@ class DiffusionUnetImagePolicy(nn.Module):
     def dtype(self):
         return next(iter(self.parameters())).dtype
 
-    # ========= inference  ============
+    # ========= INFERENCE  ============
     def conditional_sample(
         self,
-        condition_data_BTL,
-        condition_mask_BTL,
-        local_cond=None,
-        global_cond=None,
-        generator=None,
+        condition_data_BTF: torch.Tensor,
+        condition_mask_BTF: torch.Tensor,
+        local_cond_BTL: Optional[torch.Tensor] = None,
+        global_cond_BG: Optional[torch.Tensor] = None,
+        generator: Optional[torch.Tensor] = None,
         **kwargs,
-    ):
+    ) -> torch.Tensor:
         """
         args:
-            condition_data_BTL : [ B, T, L ]
-            condition_mask_BTL : [ B, T, L ]
+            condition_data_BTF : [ B, T, F ] Conditioning data that we want the final sampled
+                                             trajectory to represent. These are *known* values
+                                             for time steps and features in the trajectory.
+            condition_mask_BTF : [ B, T, F ] Mask that we apply on our condition data. Where true,
+                                             we should overwrite our predicted trajectory since we
+                                             know these values.
+            local_cond_BTL : [ B, T, L ] Temporal context: conditioning specific to each timestep
+            global_cond_BG : [ B, G ] Global context: in this case, encoded observations O_t
+            generator : Pseudo random number generator kwarg
+            **kwargs : Parameters passed into noise_scheduler.step()
+        returns:
+            trajectory_BTF : [ B, T, F ] This is our predicted trajectory that we generate by running
+                                         our conditioned diffusion sampling.
         """
         model = self.model
-        scheduler = self.noise_scheduler
+        noise_scheduler = self.noise_scheduler
+        num_inference_steps = self.num_inference_steps
 
-        trajectory = torch.randn(
-            size=condition_data_BTL.shape,
-            dtype=condition_data_BTL.dtype,
-            device=condition_data_BTL.device,
+        trajectory_BTF = torch.randn(
+            size=condition_data_BTF.shape,
+            dtype=condition_data_BTF.dtype,
+            device=condition_data_BTF.device,
             generator=generator,
         )
 
-        # set step values
-        scheduler.set_timesteps(self.num_inference_steps)
+        noise_scheduler.set_timesteps(num_inference_steps)
 
         for t in scheduler.timesteps:
-            # 1. apply conditioning
-            trajectory[condition_mask_BTL] = condition_data_BTL[condition_mask_BTL]
+            # 1. Apply conditioning
+            trajectory_BTF[condition_mask_BTF] = condition_data_BTF[condition_mask_BTF]
 
-            # 2. predict model output
+            # 2. Predict model output
             model_output = model(
-                trajectory, t, local_cond=local_cond, global_cond=global_cond
+                trajectory_BTF,
+                t,
+                local_cond_BTL=local_cond_BTL,
+                global_cond_BG=global_cond_BG,
             )
 
-            # 3. compute previous image: x_t -> x_t-1
-            trajectory = scheduler.step(
-                model_output, t, trajectory, generator=generator, **kwargs
+            # 3. compute previous observation: x_t -> x_t-1
+            trajectory_BTF = noise_scheduler.step(
+                model_output, t, trajectory_BTF, generator=generator, **kwargs
             ).prev_sample
 
-        # finally make sure conditioning is enforced
-        trajectory[condition_mask_BTL] = condition_data_BTL[condition_mask_BTL]
+        # Just in case we have any drift, apply conditioning one last time.
+        trajectory_BTF[condition_mask_BTF] = condition_data_BTF[condition_mask_BTF]
 
-        return trajectory
+        return trajectory_BTF
 
     def predict_action(
         self, obs_dict: Dict[str, torch.Tensor]
@@ -161,16 +189,16 @@ class DiffusionUnetImagePolicy(nn.Module):
         dtype = self.dtype
 
         # handle different ways of passing observation
-        local_cond = None
-        global_cond = None
-        if self.obs_as_global_cond:
+        local_cond_BTL = None
+        global_cond_BG = None
+        if self.obs_as_global_cond_BG:
             # condition through global feature
             this_nobs = dict_apply(
                 nobs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
             )
             nobs_features = self.obs_encoder(this_nobs)
             # reshape back to B, Do
-            global_cond = nobs_features.reshape(B, -1)
+            global_cond_BG = nobs_features.reshape(B, -1)
             # empty data for action
             cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
@@ -191,8 +219,8 @@ class DiffusionUnetImagePolicy(nn.Module):
         nsample = self.conditional_sample(
             cond_data,
             cond_mask,
-            local_cond=local_cond,
-            global_cond=global_cond,
+            local_cond_BTL=local_cond_BTL,
+            global_cond_BG=global_cond_BG,
             **self.kwargs,
         )
 
@@ -221,18 +249,18 @@ class DiffusionUnetImagePolicy(nn.Module):
         horizon = nactions.shape[1]
 
         # handle different ways of passing observation
-        local_cond = None
-        global_cond = None
+        local_cond_BTL = None
+        global_cond_BG = None
         trajectory = nactions
         cond_data = trajectory
-        if self.obs_as_global_cond:
+        if self.obs_as_global_cond_BG:
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(
                 nobs, lambda x: x[:, : self.n_obs_steps, ...].reshape(-1, *x.shape[2:])
             )
             nobs_features = self.obs_encoder(this_nobs)
             # reshape back to B, Do
-            global_cond = nobs_features.reshape(batch_size, -1)
+            global_cond_BG = nobs_features.reshape(batch_size, -1)
         else:
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
@@ -243,7 +271,7 @@ class DiffusionUnetImagePolicy(nn.Module):
             trajectory = cond_data.detach()
 
         # generate impainting mask
-        condition_mask_BTL = self.mask_generator(trajectory.shape)
+        condition_mask_BTF = self.mask_generator(trajectory.shape)
 
         # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
@@ -260,14 +288,17 @@ class DiffusionUnetImagePolicy(nn.Module):
         noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
 
         # compute loss mask
-        loss_mask = ~condition_mask_BTL
+        loss_mask = ~condition_mask_BTF
 
         # apply conditioning
-        noisy_trajectory[condition_mask_BTL] = cond_data[condition_mask_BTL]
+        noisy_trajectory[condition_mask_BTF] = cond_data[condition_mask_BTF]
 
         # Predict the noise residual
         pred = self.model(
-            noisy_trajectory, timesteps, local_cond=local_cond, global_cond=global_cond
+            noisy_trajectory,
+            timesteps,
+            local_cond_BTL=local_cond_BTL,
+            global_cond_BG=global_cond_BG,
         )
 
         pred_type = self.noise_scheduler.config.prediction_type
