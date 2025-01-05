@@ -152,7 +152,7 @@ class ConditionalResidualBlock1D(nn.Module):
             x_BIT : [ B, I, T ] input tensor
             condition_BC : [ B C ] conditioning tensor, C is condition_dim
 
-        output:
+        returns:
             out_BOT : [ B, O, T ] output tensor, FiLM conditioning is either
                                   fully or partially (just bias) applied
         """

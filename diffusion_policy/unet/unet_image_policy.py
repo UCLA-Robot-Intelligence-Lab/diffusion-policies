@@ -41,8 +41,8 @@ class DiffusionUnetImagePolicy(nn.Module):
         diffusion_step_embed_dim=256,
         down_dims=(256, 512, 1024),
         kernel_size=5,
-        n_groups=8,
-        cond_predict_scale=True,
+        num_groups=8,
+        film_modulation_scale=True,
         # parameters passed to step
         **kwargs,
     ):
@@ -64,13 +64,13 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         model = ConditionalUnet1D(
             input_dim=input_dim,
-            local_cond_dim=None,
-            global_cond_dim=global_cond_dim,
-            diffusion_step_embed_dim=diffusion_step_embed_dim,
+            local_cond_L=None,
+            global_cond_G=global_cond_dim,
+            diffusion_embed_D=diffusion_step_embed_dim,
             down_dims=down_dims,
             kernel_size=kernel_size,
-            n_groups=n_groups,
-            cond_predict_scale=cond_predict_scale,
+            num_groups=num_groups,
+            film_modulation_scale=film_modulation_scale,
         )
 
         self.obs_encoder = obs_encoder
@@ -118,24 +118,34 @@ class DiffusionUnetImagePolicy(nn.Module):
     ) -> torch.Tensor:
         """
         args:
-            condition_data_BTF : [ B, T, F ] Conditioning data that we want the final sampled
-                                             trajectory to represent. These are *known* values
-                                             for time steps and features in the trajectory.
-            condition_mask_BTF : [ B, T, F ] Mask that we apply on our condition data. Where True,
-                                             we should overwrite our predicted trajectory since we
-                                             know these values.
-            local_cond_BTL : [ B, T, L ] Temporal context: conditioning specific to each timestep
-            global_cond_BG : [ B, G ] Global context: in this case, encoded observations O_t
+            condition_data_BTF : [ B, T, F ] Conditioning data that we want the
+                                             final sampled trajectory to retain
+                                             These are *known* values for the
+                                             time steps and features.
+            condition_mask_BTF : [ B, T, F ] Mask that we apply on our
+                                             condition data. Where True, we
+                                             should overwrite our predicted
+                                             trajectory since they are known,
+                                             and our prediction doesn't matter.
+            local_cond_BTL : [ B, T, L ] Temporal context: (local) conditioning
+                                         specific to each timestep.
+            global_cond_BG : [ B, G ] Global context: (global) condition, which
+                                      in this case are encoded observations O_t
             generator : Pseudo random number generator kwarg
             **kwargs : Parameters passed into noise_scheduler.step()
         returns:
-            trajectory_BTF : [ B, T, F ] This is our predicted trajectory that we generate by running
-                                         our conditioned diffusion sampling.
+            trajectory_BTF : [ B, T, F ] Predicted trajectory generated using
+                                         the conditioned diffusion sampling
+                                         process. This trajectory represents
+                                         the denoised version of the input
+                                         sample (noised trajectory) and keeps
+                                         the known values (condition_data_BTF)
         """
         model = self.model
         noise_scheduler = self.noise_scheduler
         num_inference_steps = self.num_inference_steps
 
+        # Sample a noisy trajectory.
         trajectory_BTF = torch.randn(
             size=condition_data_BTF.shape,
             dtype=condition_data_BTF.dtype,
@@ -145,21 +155,26 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         noise_scheduler.set_timesteps(num_inference_steps)
 
+        # Denoise and predict previous observation
         for t in noise_scheduler.timesteps:
             # 1. Apply conditioning
             trajectory_BTF[condition_mask_BTF] = condition_data_BTF[condition_mask_BTF]
 
-            # 2. Predict model output
-            model_output = model(
-                trajectory_BTF,
-                t,
-                local_cond=local_cond_BTL,
-                global_cond=global_cond_BG,
+            # 2. Predict observation
+            denoised_trajectory_BTF = model(
+                x_BTF=trajectory_BTF,
+                timesteps_B=t,
+                local_cond_BTL=local_cond_BTL,
+                global_cond_BG=global_cond_BG,
             )
 
             # 3. Compute previous observation: x_t -> x_t-1
             trajectory_BTF = noise_scheduler.step(
-                model_output, t, trajectory_BTF, generator=generator, **kwargs
+                denoised_trajectory_BTF,
+                t,
+                trajectory_BTF,
+                generator=generator,
+                **kwargs,
             ).prev_sample
 
         # Just in case we have any drift, apply conditioning one last time.
@@ -291,13 +306,13 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         # apply conditioning
         noisy_trajectory[condition_mask_BTF] = cond_data[condition_mask_BTF]
-
+        print("in compute loss, noisy_trajectory shape: ", noisy_trajectory.shape)
         # Predict the noise residual
         pred = self.model(
             noisy_trajectory,
             timesteps,
-            local_cond=local_cond_BTL,
-            global_cond=global_cond_BG,
+            local_cond_BTL=local_cond_BTL,
+            global_cond_BG=global_cond_BG,
         )
 
         pred_type = self.noise_scheduler.config.prediction_type

@@ -26,5 +26,9 @@ O: (conv) output channel dimension
 D: embedding dimension
 H: (image) height
 W: (image) width
+
+Tensors are denoted with brackets [ ], i.e., [ B, T, L ].
+If we are just using the variable as a dimension (int),
+no brackets are present.
 """
 ```

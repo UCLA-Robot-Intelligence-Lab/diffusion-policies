@@ -1,11 +1,8 @@
-# python train_unet_diffusion_policy.py --config-path=../config --config-name=pusht_unet_image_diffusion_policy
-
 if __name__ == "__main__":
     import sys
     import os
     import pathlib
 
-    print("Sys path: ", sys.path)
     ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
     sys.path.append(ROOT_DIR)
     os.chdir(ROOT_DIR)
@@ -23,14 +20,14 @@ import random
 import wandb
 import tqdm
 import numpy as np
-import shutil
 
 from hydra.core.hydra_config import HydraConfig
+from hydra import initialize, compose
 from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
 
-from diffusion_policy.unet_image_policy.unet_image_policy import (
+from diffusion_policy.unet.unet_image_policy import (
     DiffusionUnetImagePolicy,
 )
 from shared.utils.checkpoint_util import TopKCheckpointManager
@@ -401,10 +398,14 @@ class TrainDiffusionUnetImageWorkspace:
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
     config_name=pathlib.Path(__file__).stem,
 )
-def main(cfg):
+def main(cfg=None):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
+    if cfg is None:
+        with initialize(config_path="../config"):
+            cfg = compose(config_name="train_unet_image_policy")
     workspace.run()
 
 
 if __name__ == "__main__":
+    # Or, python train_unet_image_policy.py --config-path=../config --config-name=train_unet_image_policy
     main()

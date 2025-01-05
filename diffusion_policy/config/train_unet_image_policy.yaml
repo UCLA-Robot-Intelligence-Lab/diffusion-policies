@@ -3,7 +3,7 @@ defaults:
   - task: pusht_image
 
 name: train_diffusion_unet_image
-_target_: diffusion_policy.unet_image_policy.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
+_target_: diffusion_policy.unet.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
 
 task_name: ${task.name}
 shape_meta: ${task.shape_meta}
@@ -19,10 +19,10 @@ keypoint_visible_rate: 1.0
 obs_as_global_cond: True
 
 policy:
-  _target_: diffusion_policy.unet_image_policy.unet_image_policy.DiffusionUnetImagePolicy
+  _target_: diffusion_policy.unet.unet_image_policy.DiffusionUnetImagePolicy
 
   shape_meta: ${shape_meta}
-  
+
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
     num_train_timesteps: 100
@@ -57,8 +57,8 @@ policy:
   diffusion_step_embed_dim: 128
   down_dims: [512, 1024, 2048]
   kernel_size: 5
-  n_groups: 8
-  cond_predict_scale: True
+  num_groups: 8
+  film_modulation_scale: True
 
   # scheduler.step params
   # predict_epsilon: True
