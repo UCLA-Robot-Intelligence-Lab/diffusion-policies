@@ -9,8 +9,8 @@ Selected Dimension Keys:
 B: batch size
 T: prediction horizon
 C: conditioning dimension
-I: (conv) input channel dimension
-O: (conv) output channel dimension
+I: (conv, generic) input channel dimension
+O: (conv, generic) output channel dimension
 """
 
 

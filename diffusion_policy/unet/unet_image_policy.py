@@ -162,7 +162,7 @@ class DiffusionUnetImagePolicy(nn.Module):
 
             # 2. Predict observation
             denoised_trajectory_BTF = model(
-                x_BTF=trajectory_BTF,
+                sample_BTF=trajectory_BTF,
                 timesteps_B=t,
                 local_cond_BTL=local_cond_BTL,
                 global_cond_BG=global_cond_BG,
@@ -306,7 +306,7 @@ class DiffusionUnetImagePolicy(nn.Module):
 
         # apply conditioning
         noisy_trajectory[condition_mask_BTF] = cond_data[condition_mask_BTF]
-        print("in compute loss, noisy_trajectory shape: ", noisy_trajectory.shape)
+
         # Predict the noise residual
         pred = self.model(
             noisy_trajectory,

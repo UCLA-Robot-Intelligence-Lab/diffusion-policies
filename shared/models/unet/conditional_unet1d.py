@@ -4,13 +4,14 @@ import torch.nn as nn
 import einops
 
 from typing import Union, Optional
+from shared.models.components.positional_embedding import SinusoidalPosEmb
 from shared.models.components.conv1d_components import (
     Downsample1d,
     Upsample1d,
     Conv1dBlock,
     ConditionalResidualBlock1D,
 )
-from shared.models.components.positional_embedding import SinusoidalPosEmb
+
 
 """
 Selected Dimension Keys
@@ -20,10 +21,10 @@ T: prediction horizon
 F: feature dimension
 G: global conditioning dimension
 L: local conditioning dimension
+I: (conv, generic) input channel dimension
+O: (conv, generic) output channel dimension
 
-I: input channel dimension (generic, not specific)
-O: output channel dimension (generic, not specific)
-O and I are defined by down_dims
+I and O are defined by down_dims
 """
 
 
@@ -44,7 +45,7 @@ class ConditionalUnet1D(nn.Module):
     ):
         super().__init__()
         layer_dims = [input_dim] + list(down_dims)
-        base_feat_dim = down_dims[0]
+        base_dim = down_dims[0]
 
         # Diffusion step: [ B, ] -> [ B, D ]
         diffusion_step_encoder = nn.Sequential(
@@ -56,7 +57,7 @@ class ConditionalUnet1D(nn.Module):
 
         # Combined conditioning:
         # [ B, D ] + ([ B, G ] if global_cond_G else [ ]) -> [ B, C ]
-        cond_dim = (
+        condition_dim = (
             diffusion_embed_D + global_cond_G
             if global_cond_G is not None
             else diffusion_embed_D
@@ -66,26 +67,25 @@ class ConditionalUnet1D(nn.Module):
         layer_dim_pairs = list(zip(layer_dims[:-1], layer_dims[1:]))
 
         # Local conditioning: [ B, T, L ] -> [ B, O, T ]
+        # First block is for downsampling, second is for upsampling
         local_cond_encoder = None
         if local_cond_L is not None:
-            _, dim_out = layer_dim_pairs[0]
-            dim_in = local_cond_L
+            inp_channels = local_cond_L
+            _, out_channels = layer_dim_pairs[0]
             local_cond_encoder = nn.ModuleList(
                 [
-                    # down encoder
                     ConditionalResidualBlock1D(
-                        dim_in,
-                        dim_out,
-                        condition_dim=cond_dim,
+                        inp_channels=inp_channels,
+                        out_channels=out_channels,
+                        condition_dim=condition_dim,
                         kernel_size=kernel_size,
                         num_groups=num_groups,
                         film_modulation_scale=film_modulation_scale,
                     ),
-                    # up encoder
                     ConditionalResidualBlock1D(
-                        dim_in,
-                        dim_out,
-                        condition_dim=cond_dim,
+                        inp_channels=inp_channels,
+                        out_channels=out_channels,
+                        condition_dim=condition_dim,
                         kernel_size=kernel_size,
                         num_groups=num_groups,
                         film_modulation_scale=film_modulation_scale,
@@ -93,22 +93,52 @@ class ConditionalUnet1D(nn.Module):
                 ]
             )
 
-        # Bottleneck / middle blocks: [ B, T, L ] -> [ B, O, T ]
-        mid_dim = layer_dims[-1]
+        # Downsampling path: initial input is [ B, F, T ]
+        # At each iteration: [ B, I, T ] -> [ B, O, T/2 ]; O := layer_dims[ind]
+        down_modules = nn.ModuleList([])
+        for idx, (inp_channels, out_channels) in enumerate(layer_dim_pairs):
+            last = idx >= (len(layer_dim_pairs) - 1)
+            down_modules.append(
+                nn.ModuleList(
+                    [
+                        ConditionalResidualBlock1D(
+                            inp_channels=inp_channels,
+                            out_channels=out_channels,
+                            condition_dim=condition_dim,
+                            kernel_size=kernel_size,
+                            num_groups=num_groups,
+                            film_modulation_scale=film_modulation_scale,
+                        ),
+                        ConditionalResidualBlock1D(
+                            inp_channels=out_channels,
+                            out_channels=out_channels,
+                            condition_dim=condition_dim,
+                            kernel_size=kernel_size,
+                            num_groups=num_groups,
+                            film_modulation_scale=film_modulation_scale,
+                        ),
+                        Downsample1d(out_channels) if not last else nn.Identity(),
+                    ]
+                )
+            )
+
+        # Bottleneck blocks: [ B, O, T' ] -> [ B, O, T' ]
+        # Where O := layer_dims[-1] and T' := final T from downsampling
+        bottleneck_channels = layer_dims[-1]
         self.mid_modules = nn.ModuleList(
             [
                 ConditionalResidualBlock1D(
-                    mid_dim,
-                    mid_dim,
-                    condition_dim=cond_dim,
+                    inp_channels=bottleneck_channels,
+                    out_channels=bottleneck_channels,
+                    condition_dim=condition_dim,
                     kernel_size=kernel_size,
                     num_groups=num_groups,
                     film_modulation_scale=film_modulation_scale,
                 ),
                 ConditionalResidualBlock1D(
-                    mid_dim,
-                    mid_dim,
-                    condition_dim=cond_dim,
+                    inp_channels=bottleneck_channels,
+                    out_channels=bottleneck_channels,
+                    condition_dim=condition_dim,
                     kernel_size=kernel_size,
                     num_groups=num_groups,
                     film_modulation_scale=film_modulation_scale,
@@ -116,73 +146,47 @@ class ConditionalUnet1D(nn.Module):
             ]
         )
 
-        # Downsampling path: [ B, I, T ] -> [ B, O, T/2 ] for each iteration
-        down_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(layer_dim_pairs):
-            is_last = ind >= (len(layer_dim_pairs) - 1)
-            down_modules.append(
-                nn.ModuleList(
-                    [
-                        ConditionalResidualBlock1D(
-                            dim_in,
-                            dim_out,
-                            condition_dim=cond_dim,
-                            kernel_size=kernel_size,
-                            num_groups=num_groups,
-                            film_modulation_scale=film_modulation_scale,
-                        ),
-                        ConditionalResidualBlock1D(
-                            dim_out,
-                            dim_out,
-                            condition_dim=cond_dim,
-                            kernel_size=kernel_size,
-                            num_groups=num_groups,
-                            film_modulation_scale=film_modulation_scale,
-                        ),
-                        Downsample1d(dim_out) if not is_last else nn.Identity(),
-                    ]
-                )
-            )
-
         # Upsampling path: [ B, O*2, T ] -> [ B, I, T*2 ] for each iteration
         up_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(reversed(layer_dim_pairs[1:])):
-            is_last = ind >= (len(layer_dim_pairs) - 1)
+        for idx, (inp_channels, out_channels) in enumerate(
+            reversed(layer_dim_pairs[1:])
+        ):
+            last = idx >= (len(layer_dim_pairs) - 1)
             up_modules.append(
                 nn.ModuleList(
                     [
                         ConditionalResidualBlock1D(
-                            dim_out * 2,
-                            dim_in,
-                            condition_dim=cond_dim,
+                            inp_channels=out_channels * 2,
+                            out_channels=inp_channels,
+                            condition_dim=condition_dim,
                             kernel_size=kernel_size,
                             num_groups=num_groups,
                             film_modulation_scale=film_modulation_scale,
                         ),
                         ConditionalResidualBlock1D(
-                            dim_in,
-                            dim_in,
-                            condition_dim=cond_dim,
+                            inp_channels=inp_channels,
+                            out_channels=inp_channels,
+                            condition_dim=condition_dim,
                             kernel_size=kernel_size,
                             num_groups=num_groups,
                             film_modulation_scale=film_modulation_scale,
                         ),
-                        Upsample1d(dim_in) if not is_last else nn.Identity(),
+                        Upsample1d(inp_channels) if not last else nn.Identity(),
                     ]
                 )
             )
 
-        # Final projection: [ B, O, T ] -> [ B, F, T ]
-        final_conv = nn.Sequential(
-            Conv1dBlock(base_feat_dim, base_feat_dim, kernel_size=kernel_size),
-            nn.Conv1d(base_feat_dim, input_dim, 1),
+        # Final projection: [ B, I, T ] -> [ B, F, T ]
+        final_projection = nn.Sequential(
+            Conv1dBlock(base_dim, base_dim, kernel_size=kernel_size),
+            nn.Conv1d(base_dim, input_dim, 1),
         )
 
         self.diffusion_step_encoder = diffusion_step_encoder
         self.local_cond_encoder = local_cond_encoder
         self.up_modules = up_modules
         self.down_modules = down_modules
-        self.final_conv = final_conv
+        self.final_projection = final_projection
 
         logger.info(
             "number of parameters: %e", sum(p.numel() for p in self.parameters())
@@ -190,7 +194,7 @@ class ConditionalUnet1D(nn.Module):
 
     def forward(
         self,
-        x_BTF: torch.Tensor,
+        sample_BTF: torch.Tensor,
         timesteps_B: Union[torch.Tensor, float, int],
         local_cond_BTL: Optional[torch.Tensor] = None,
         global_cond_BG: Optional[torch.Tensor] = None,
@@ -198,10 +202,10 @@ class ConditionalUnet1D(nn.Module):
     ):
         """
         args:
-            x_BTF : [ B, T, F ] Input tensor, typically a trajectory that
-                                has already been conditioned and noised.
-                                A "sample" from the noisy data distribution.
-                                We predict a denoised trajectory.
+            sample_BTF : [ B, T, F ] Input tensor, typically a trajectory that
+                                     has already been conditioned and noised.
+                                     A "sample" from the noisy data distribution.
+                                     We predict a denoised trajectory.
             timesteps_B : [ B, ] Diffusion step(s) corresponding to each sample
                                  in the batch. This is to enable the model to
                                  know, for each sample in the batch, how noisy
@@ -237,81 +241,76 @@ class ConditionalUnet1D(nn.Module):
         down_modules = self.down_modules
         mid_modules = self.mid_modules
         up_modules = self.up_modules
-        final_conv = self.final_conv
+        final_projection = self.final_projection
 
         # Rearrange input; x : [ B F T ] -> [ B F T ] for convolutional layers.
-        x_BFT = einops.rearrange(x_BTF, "B T F -> B F T")
+        sample_BFT = einops.rearrange(sample_BTF, "B T F -> B F T")
 
         # 1. Process timesteps.
         if not torch.is_tensor(timesteps_B):
             timesteps_B = torch.tensor(
-                [timesteps_B], dtype=torch.long, device=x_BFT.device
+                [timesteps_B], dtype=torch.long, device=sample_BFT.device
             )
         elif torch.is_tensor(timesteps_B) and len(timesteps_B.shape) == 0:
-            timesteps_B = timesteps_B[None].to(x_BFT.device)
+            timesteps_B = timesteps_B[None].to(sample_BFT.device)
 
         # Broadcast to batch dimension by adding a view; compatible with ONNX
-        timesteps_B = timesteps_B.expand(x_BFT.shape[0])
+        timesteps_B = timesteps_B.expand(sample_BFT.shape[0])
 
-        # 2. Encode timestep and global conditioning
+        # 2. Encode timestep and global conditioning.
         global_feat_BD = diffusion_step_encoder(timesteps_B)
-        print("global_feat_BF shape 1: ", global_feat_BD.shape)
 
+        # NOTE: We are re-defining G at this point! (G := D+G)
         if global_cond_BG is not None:
-            global_feat_BF = torch.cat([global_feat_BD, global_cond_BG], axis=-1)
-        print("global_cond_BG shape: ", global_cond_BG.shape)
-        print("global_feat_BF shape 2: ", global_feat_BF.shape)
+            global_feat_BG = torch.cat([global_feat_BD, global_cond_BG], axis=-1)
 
-        # 3. Encode local conditioning if provided
+        # 3. Encode local conditioning if provided.
         # Local feature maps for downsampling-upsampling skip connections
         local_feat_maps = []
         if local_cond_BTL is not None:
             local_cond_BLT = einops.rearrange(local_cond_BTL, "B T L -> B L T")
             res_block1, res_block2 = local_cond_encoder
 
-            x_BOT = res_block1(local_cond_BLT, global_feat_BF)
+            x_BOT = res_block1(local_cond_BLT, global_feat_BG)
             local_feat_maps.append(x_BOT)  # [0] Used at first downsample step
 
-            x_BOT = res_block2(local_cond_BLT, global_feat_BF)
+            x_BOT = res_block2(local_cond_BLT, global_feat_BG)
             local_feat_maps.append(x_BOT)  # [1] Used at final upsample step
 
         # 4. Downsampling path
-        # Feature maps for downsampling-upsampling skip connections
-        feat_maps = []
-        print("x_BFT shape before downsampling: ", x_BFT.shape)
+        # At this point, the feature dimension is projected, so we rename accordingly
+        x_BOT = sample_BFT  # After the first residual block, F (I) -> O (layer_dims[0])
+        feat_maps = []  # Feature maps for downsampling-upsampling skip connections
         for idx, (res_block1, res_block2, downsample) in enumerate(down_modules):
-            print("Entering downsample path on idx: ", idx)
-            x_BFT = res_block1(x_BFT, global_feat_BF)
-            print("x_BFT: ", x_BFT.shape)
+            x_BOT = res_block1(x_BOT, global_feat_BG)
+
             # Add first set of local feature maps at initial resolution
             if idx == 0 and len(local_feat_maps) > 0:
-                x_BFT = x_BFT + local_feat_maps[0]
+                x_BOT = x_BOT + local_feat_maps[0]
 
-            x_BFT = res_block2(x_BFT, global_feat_BF)
-            print("x_BFT: ", x_BFT.shape)
-            feat_maps.append(x_BFT)
+            x_BOT = res_block2(x_BOT, global_feat_BG)
+            feat_maps.append(x_BOT)
 
-            x_BFT = downsample(x_BFT)
-            print("x_BFT: ", x_BFT.shape)
+            x_BOT = downsample(x_BOT)
 
-        # 5. Middle / bottlenecks blocks
-        for mid_module in mid_modules:
-            x_BFT = mid_module(x_BFT, global_feat_BF)
+        # 5. Bottleneck / middle blocks
+        for bottleneck_block in mid_modules:
+            x_BOT = bottleneck_block(x_BOT, global_feat_BG)  # O := layer_dims[-1]
 
         # 6. Upsampling path
         for idx, (res_block1, res_block2, upsample) in enumerate(up_modules):
-            x_BFT = torch.cat((x_BFT, feat_maps.pop()), dim=1)
-            x_BFT = res_block1(x_BFT, global_feat_BF)
+            x_BOT = torch.cat((x_BOT, feat_maps.pop()), dim=1)
+            x_BOT = res_block1(x_BOT, global_feat_BG)
 
             # Prev.len(up_modules). According to original repo, this is correct
             if idx == (len(up_modules) - 1) and len(local_feat_maps) > 0:
-                x_BFT = x_BFT + local_feat_maps[1]
+                x_BOT = x_BOT + local_feat_maps[1]
 
-            x_BFT = res_block2(x_BFT, global_feat_BF)
-            x_BFT = upsample(x_BFT)
+            x_BOT = res_block2(x_BOT, global_feat_BG)
+            x_BOT = upsample(x_BOT)
 
-        # 7. Final projection / convolution
-        x_BFT = final_conv(x_BFT)
+        # 7. Final projection, bring O dim (actually I) back down to F dim
+        x_BFT = final_projection(x_BOT)
 
         out_BTF = einops.rearrange(x_BFT, "B F T -> B T F")
 
