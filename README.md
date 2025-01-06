@@ -19,7 +19,7 @@ F: feature dimension
     Fo: observation feature dimension
     Fa: action feature dimension
 D: embedding dimension
-C: conditioning (observation) dimension
+C: (generic) conditioning dimension, sometimes channel dimension
 G: global conditioning dimension
 L: local conditioning dimension
 I: (conv, generic) input channel dimension
@@ -27,9 +27,15 @@ O: (conv, generic) output channel dimension
 H: (image) height
 W: (image) width
 
-Tensors are denoted with brackets [ ], i.e., [ B, T, L ].
-If we are just using the variable as a dimension (int),
-no brackets are present.
+Tensors are denoted with brackets [ ], i.e., [ B, T, L ] and suffixed,
+i.e., x_BOT. If we are just using the variable as a dimension (int),
+no brackets are present, and the name will additionally be suffixed
+with _dim_, i.e., inp_dim_F.
+
+To read tensors, i.e., cond_BTL, apply the last dimension as a prefix
+when applicable (L, G). Our example would read "local conditioning
+tensor of shape (B, T, L)". Otherwise, just read the tensor directly,
+adding the shape as a suffix.
 """
 ```
 

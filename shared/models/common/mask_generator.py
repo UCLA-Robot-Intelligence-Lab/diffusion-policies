@@ -48,18 +48,18 @@ class DummyMaskGenerator(nn.Module):
 class LowdimMaskGenerator(nn.Module):
     def __init__(
         self,
-        action_dim,
-        obs_dim,
+        action_dim_Fa,
+        obs_feat_dim_Fo,
         # obs mask setup
-        max_n_obs_steps=2,
+        max_num_obs_steps=2,
         fix_obs_steps=True,
         # action mask
         action_visible=False,
     ):
         super().__init__()
-        self.action_dim = action_dim
-        self.obs_dim = obs_dim
-        self.max_n_obs_steps = max_n_obs_steps
+        self.action_dim_Fa = action_dim_Fa
+        self.obs_feat_dim_Fo = obs_feat_dim_Fo
+        self.max_num_obs_steps = max_num_obs_steps
         self.fix_obs_steps = fix_obs_steps
         self.action_visible = action_visible
         self.dummy_varibale = nn.Parameter()
@@ -76,7 +76,7 @@ class LowdimMaskGenerator(nn.Module):
     def forward(self, shape, seed=None):
         device = self.device
         B, T, D = shape
-        assert D == (self.action_dim + self.obs_dim)
+        assert D == (self.action_dim_Fa + self.obs_feat_dim_Fo)
 
         # create all tensors on this device
         rng = torch.Generator(device=device)
@@ -85,17 +85,19 @@ class LowdimMaskGenerator(nn.Module):
 
         # generate dim mask
         dim_mask = torch.zeros(size=shape, dtype=torch.bool, device=device)
-        is_action_dim = dim_mask.clone()
-        is_action_dim[..., : self.action_dim] = True
-        is_obs_dim = ~is_action_dim
+        is_action_dim_Fa = dim_mask.clone()
+        is_action_dim_Fa[..., : self.action_dim_Fa] = True
+        is_obs_feat_dim_Fo = ~is_action_dim_Fa
 
         # generate obs mask
         if self.fix_obs_steps:
-            obs_steps = torch.full((B,), fill_value=self.max_n_obs_steps, device=device)
+            obs_steps = torch.full(
+                (B,), fill_value=self.max_num_obs_steps, device=device
+            )
         else:
             obs_steps = torch.randint(
                 low=1,
-                high=self.max_n_obs_steps + 1,
+                high=self.max_num_obs_steps + 1,
                 size=(B,),
                 generator=rng,
                 device=device,
@@ -103,7 +105,7 @@ class LowdimMaskGenerator(nn.Module):
 
         steps = torch.arange(0, T, device=device).reshape(1, T).expand(B, T)
         obs_mask = (steps.T < obs_steps).T.reshape(B, T, 1).expand(B, T, D)
-        obs_mask = obs_mask & is_obs_dim
+        obs_mask = obs_mask & is_obs_feat_dim_Fo
 
         # generate action mask
         if self.action_visible:
@@ -112,7 +114,7 @@ class LowdimMaskGenerator(nn.Module):
                 torch.tensor(0, dtype=obs_steps.dtype, device=obs_steps.device),
             )
             action_mask = (steps.T < action_steps).T.reshape(B, T, 1).expand(B, T, D)
-            action_mask = action_mask & is_action_dim
+            action_mask = action_mask & is_action_dim_Fa
 
         mask = obs_mask
         if self.action_visible:
@@ -125,10 +127,10 @@ class KeypointMaskGenerator(nn.Module):
     def __init__(
         self,
         # dimensions
-        action_dim,
+        action_dim_Fa,
         keypoint_dim,
         # obs mask setup
-        max_n_obs_steps=2,
+        max_num_obs_steps=2,
         fix_obs_steps=True,
         # keypoint mask setup
         keypoint_visible_rate=0.7,
@@ -139,10 +141,10 @@ class KeypointMaskGenerator(nn.Module):
         n_context_steps=1,
     ):
         super().__init__()
-        self.action_dim = action_dim
+        self.action_dim_Fa = action_dim_Fa
         self.keypoint_dim = keypoint_dim
         self.context_dim = context_dim
-        self.max_n_obs_steps = max_n_obs_steps
+        self.max_num_obs_steps = max_num_obs_steps
         self.fix_obs_steps = fix_obs_steps
         self.keypoint_visible_rate = keypoint_visible_rate
         self.time_independent = time_independent
@@ -162,7 +164,7 @@ class KeypointMaskGenerator(nn.Module):
     def forward(self, shape, seed=None):
         device = self.device
         B, T, D = shape
-        all_keypoint_dims = D - self.action_dim - self.context_dim
+        all_keypoint_dims = D - self.action_dim_Fa - self.context_dim
         n_keypoints = all_keypoint_dims // self.keypoint_dim
 
         # create all tensors on this device
@@ -172,21 +174,23 @@ class KeypointMaskGenerator(nn.Module):
 
         # generate dim mask
         dim_mask = torch.zeros(size=shape, dtype=torch.bool, device=device)
-        is_action_dim = dim_mask.clone()
-        is_action_dim[..., : self.action_dim] = True
+        is_action_dim_Fa = dim_mask.clone()
+        is_action_dim_Fa[..., : self.action_dim_Fa] = True
         is_context_dim = dim_mask.clone()
         if self.context_dim > 0:
             is_context_dim[..., -self.context_dim :] = True
-        is_obs_dim = ~(is_action_dim | is_context_dim)
+        is_obs_feat_dim_Fo = ~(is_action_dim_Fa | is_context_dim)
         # assumption trajectory=cat([action, keypoints, context], dim=-1)
 
         # generate obs mask
         if self.fix_obs_steps:
-            obs_steps = torch.full((B,), fill_value=self.max_n_obs_steps, device=device)
+            obs_steps = torch.full(
+                (B,), fill_value=self.max_num_obs_steps, device=device
+            )
         else:
             obs_steps = torch.randint(
                 low=1,
-                high=self.max_n_obs_steps + 1,
+                high=self.max_num_obs_steps + 1,
                 size=(B,),
                 generator=rng,
                 device=device,
@@ -194,7 +198,7 @@ class KeypointMaskGenerator(nn.Module):
 
         steps = torch.arange(0, T, device=device).reshape(1, T).expand(B, T)
         obs_mask = (steps.T < obs_steps).T.reshape(B, T, 1).expand(B, T, D)
-        obs_mask = obs_mask & is_obs_dim
+        obs_mask = obs_mask & is_obs_feat_dim_Fo
 
         # generate action mask
         if self.action_visible:
@@ -203,7 +207,7 @@ class KeypointMaskGenerator(nn.Module):
                 torch.tensor(0, dtype=obs_steps.dtype, device=obs_steps.device),
             )
             action_mask = (steps.T < action_steps).T.reshape(B, T, 1).expand(B, T, D)
-            action_mask = action_mask & is_action_dim
+            action_mask = action_mask & is_action_dim_Fa
 
         # generate keypoint mask
         if self.time_independent:
@@ -217,7 +221,7 @@ class KeypointMaskGenerator(nn.Module):
             visible_dims_mask = torch.cat(
                 [
                     torch.ones(
-                        (B, T, self.action_dim), dtype=torch.bool, device=device
+                        (B, T, self.action_dim_Fa), dtype=torch.bool, device=device
                     ),
                     visible_dims,
                     torch.ones(
@@ -237,14 +241,16 @@ class KeypointMaskGenerator(nn.Module):
             )
             visible_dims_mask = torch.cat(
                 [
-                    torch.ones((B, self.action_dim), dtype=torch.bool, device=device),
+                    torch.ones(
+                        (B, self.action_dim_Fa), dtype=torch.bool, device=device
+                    ),
                     visible_dims,
                     torch.ones((B, self.context_dim), dtype=torch.bool, device=device),
                 ],
                 axis=-1,
             )
             keypoint_mask = visible_dims_mask.reshape(B, 1, D).expand(B, T, D)
-        keypoint_mask = keypoint_mask & is_obs_dim
+        keypoint_mask = keypoint_mask & is_obs_feat_dim_Fo
 
         # generate context mask
         context_mask = is_context_dim.clone()
@@ -257,10 +263,3 @@ class KeypointMaskGenerator(nn.Module):
             mask = mask | context_mask
 
         return mask
-
-
-def test():
-    # kmg = KeypointMaskGenerator(2,2, random_obs_steps=True)
-    # self = KeypointMaskGenerator(2,2,context_dim=2, action_visible=True)
-    # self = KeypointMaskGenerator(2,2,context_dim=0, action_visible=True)
-    self = LowdimMaskGenerator(2, 20, max_n_obs_steps=3, action_visible=True)

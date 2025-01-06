@@ -5,7 +5,7 @@ import torchvision
 
 from typing import Dict, Tuple, Union
 from shared.vision.common.crop_randomizer import CropRandomizer
-from shared.utils.pytorch_util import dict_apply, replace_submodules
+from shared.utils.pytorch_util import replace_submodules
 
 
 class MultiImageObsEncoder(nn.Module):

@@ -66,7 +66,7 @@ class ConditionalResidualBlock1D(nn.Module):
         self,
         inp_channels: int,
         out_channels: int,
-        condition_dim: int,
+        cond_dim_C: int,
         kernel_size: int = 3,
         num_groups: int = 8,
         film_modulation_scale: bool = False,
@@ -76,12 +76,15 @@ class ConditionalResidualBlock1D(nn.Module):
         args:
             inp_channels : I number of input channels
             out_channels : O desired number of output channels
-            condition_dim : C dimension of the conditioning vector used in FiLM
+            cond_dim_C : dimension of the conditioning vector
+                              used in FiLM
             kernel_size : desired kernel size used in Conv1d blocks
-            num_groups : number of groups for the GroupNorm used in Conv1d blocks
-            film_modulation_scale : set to True if you want FiLM conditioning to also
-                                    modulate the scale (gamma). By default we always
-                                    modulate with a bias (beta). Read more below.
+            num_groups : number of groups for the GroupNorm used
+                         in Conv1d blocks
+            film_modulation_scale : set to True if you want FiLM conditioning
+                                    to also modulate the scale (gamma). By
+                                    default we always modulate with a bias 
+                                    (beta). Read more below.
         """
 
         self.blocks = nn.ModuleList(
@@ -125,13 +128,15 @@ class ConditionalResidualBlock1D(nn.Module):
         """
 
         # If film_modulation_scale is True, we need 2*O channels to predict both scale and bias
-        condition_channels = out_channels * 2 if film_modulation_scale else out_channels
+        condition_channels_O = (
+            out_channels * 2 if film_modulation_scale else out_channels
+        )
 
-        # condition_dim : [ B, C ] -> embed : [ B, O, 1 ]
+        # cond_dim_C : [ B, C ] -> embed : [ B, O, 1 ]
         self.film_generator = nn.Sequential(
             nn.Mish(),
-            nn.Linear(condition_dim, condition_channels),
-            Rearrange("batch t -> batch t 1"),  # For broadcasting later.
+            nn.Linear(cond_dim_C, condition_channels_O),
+            Rearrange("B C -> B C 1"),  # For broadcasting later.
         )
 
         # x : [ B, T, I ] -> [ B, T, O ]
@@ -150,7 +155,7 @@ class ConditionalResidualBlock1D(nn.Module):
         """
         args:
             x_BIT : [ B, I, T ] input tensor
-            condition_BC : [ B C ] conditioning tensor, C is condition_dim
+            condition_BC : [ B C ] conditioning tensor, C is cond_dim_C
 
         returns:
             out_BOT : [ B, O, T ] output tensor, FiLM conditioning is either

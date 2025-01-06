@@ -10,7 +10,6 @@ import wandb.sdk.data_types.video as wv
 
 from shared.env.pusht.pusht_image_env import PushTImageEnv
 from shared.utils.gym.async_vector_env import AsyncVectorEnv
-from shared.utils.gym.sync_vector_env import SyncVectorEnv
 from shared.utils.gym.multistep_wrapper import MultiStepWrapper
 from shared.utils.gym.video_recording_wrapper import (
     VideoRecorder,
@@ -31,8 +30,8 @@ class PushTImageRunner:
         legacy_test=False,
         test_start_seed=10000,
         max_steps=200,
-        n_obs_steps=8,
-        n_action_steps=8,
+        num_obs_steps=8,
+        num_action_steps=8,
         fps=10,
         crf=22,
         render_size=96,
@@ -61,8 +60,8 @@ class PushTImageRunner:
                     file_path=None,
                     steps_per_render=steps_per_render,
                 ),
-                n_obs_steps=n_obs_steps,
-                n_action_steps=n_action_steps,
+                num_obs_steps=num_obs_steps,
+                num_action_steps=num_action_steps,
                 max_episode_steps=max_steps,
             )
 
@@ -139,8 +138,8 @@ class PushTImageRunner:
         self.env_init_fn_dills = env_init_fn_dills
         self.fps = fps
         self.crf = crf
-        self.n_obs_steps = n_obs_steps
-        self.n_action_steps = n_action_steps
+        self.num_obs_steps = num_obs_steps
+        self.num_action_steps = num_action_steps
         self.past_action = past_action
         self.max_steps = max_steps
         self.tqdm_interval_sec = tqdm_interval_sec
@@ -193,7 +192,7 @@ class PushTImageRunner:
                 if self.past_action and (past_action is not None):
                     # TODO: not tested
                     np_obs_dict["past_action"] = past_action[
-                        :, -(self.n_obs_steps - 1) :
+                        :, -(self.num_obs_steps - 1) :
                     ].astype(np.float32)
 
                 # device transfer
