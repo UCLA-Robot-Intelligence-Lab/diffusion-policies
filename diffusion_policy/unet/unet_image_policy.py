@@ -8,7 +8,7 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from shared.models.common.normalizer import LinearNormalizer
 from shared.models.unet.conditional_unet1d import ConditionalUnet1D
 from shared.models.common.mask_generator import LowdimMaskGenerator
-from shared.vision.common.multi_image_obs_encoder import MultiImageObsEncoder
+from shared.vision.common.multi_image_obs_encoder import ObsEncoder
 from shared.utils.pytorch_util import dict_apply
 
 """
@@ -31,7 +31,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         self,
         shape_meta: dict,
         noise_scheduler: DDPMScheduler,
-        obs_encoder: MultiImageObsEncoder,
+        obs_encoder: ObsEncoder,
         horizon: int,
         num_action_steps: int,
         num_obs_steps: int,

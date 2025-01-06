@@ -1,4 +1,4 @@
-name: diffpolicies
+name: diffpolicy
 channels:
   - pytorch3d
   - pytorch

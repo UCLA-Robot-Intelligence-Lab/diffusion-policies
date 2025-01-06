@@ -18,7 +18,7 @@ class CropRandomizer(nn.Module):
         pos_enc=False,
     ):
         """
-        Args:
+        args:
             input_shape (tuple, list): shape of input (not including batch dimension)
             crop_height (int): crop height
             crop_width (int): crop width
@@ -44,12 +44,12 @@ class CropRandomizer(nn.Module):
         the @forward_in operation, where raw inputs (usually observation modalities)
         are passed in.
 
-        Args:
+        args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
                 Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
-        Returns:
+        returns:
             out_shape ([int]): list of integers corresponding to output shape
         """
 
@@ -65,12 +65,12 @@ class CropRandomizer(nn.Module):
         the @forward_out operation, where processed inputs (usually encoded observation
         modalities) are passed in.
 
-        Args:
+        args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
                 Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
-        Returns:
+        returns:
             out_shape ([int]): list of integers corresponding to output shape
         """
 
@@ -146,7 +146,7 @@ def crop_image_from_indices(images, crop_indices, crop_height, crop_width):
     Crops images at the locations specified by @crop_indices. Crops will be
     taken across all channels.
 
-    Args:
+    args:
         images (torch.Tensor): batch of images of shape [..., C, H, W]
 
         crop_indices (torch.Tensor): batch of indices of shape [..., N, 2] where
@@ -163,7 +163,7 @@ def crop_image_from_indices(images, crop_indices, crop_height, crop_width):
 
         crop_width (int): width of crop to take
 
-    Returns:
+    returns:
         crops (torch.Tesnor): cropped images of shape [..., C, @crop_height, @crop_width]
     """
 

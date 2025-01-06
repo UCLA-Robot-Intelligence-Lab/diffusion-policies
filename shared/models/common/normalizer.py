@@ -15,9 +15,9 @@ class LinearNormalizer(nn.Module):
         """
         Initializes the LinearNormalizer.
 
-        Args:
-            params_dict (nn.ParameterDict, optional): A ParameterDict containing normalization parameters.
-                If None, an empty ParameterDict is initialized.
+        args:
+            params_dict (nn.ParameterDict, optional): A ParameterDict containing
+            normalization parameters. If None, an empty ParameterDict is initialized.
         """
         super().__init__()
         if params_dict is None:
@@ -27,7 +27,7 @@ class LinearNormalizer(nn.Module):
     @property
     def device(self):
         """
-        Returns the device of the first parameter in the ParameterDict.
+        returns the device of the first parameter in the ParameterDict.
         """
         return next(iter(self.parameters())).device
 
@@ -44,7 +44,7 @@ class LinearNormalizer(nn.Module):
         """
         Custom method to load parameters from a state_dict.
 
-        Args:
+        args:
             state_dict (dict): State dictionary containing model parameters.
             prefix (str): Prefix for parameter keys.
             local_metadata (dict): Metadata for loading.
@@ -90,7 +90,7 @@ class LinearNormalizer(nn.Module):
         """
         Fits the normalizer parameters to the provided data.
 
-        Args:
+        args:
             data (Union[Dict, torch.Tensor, np.ndarray, zarr.Array]): Input data to fit.
             last_n_dims (int, optional): Number of dimensions to consider as features.
             dtype (torch.dtype, optional): Data type for computations.
@@ -128,10 +128,10 @@ class LinearNormalizer(nn.Module):
         """
         Allows the normalizer to be called as a function to normalize data.
 
-        Args:
+        args:
             x (Union[Dict, torch.Tensor, np.ndarray]): Input data to normalize.
 
-        Returns:
+        returns:
             torch.Tensor: Normalized data.
         """
         return self.normalize(x)
@@ -140,10 +140,10 @@ class LinearNormalizer(nn.Module):
         """
         Allows accessing a specific field's normalizer.
 
-        Args:
+        args:
             key (str): Key of the field.
 
-        Returns:
+        returns:
             SingleFieldLinearNormalizer: Normalizer for the specified field.
         """
         return SingleFieldLinearNormalizer(self.params_dict[key])
@@ -152,7 +152,7 @@ class LinearNormalizer(nn.Module):
         """
         Allows setting a specific field's normalizer.
 
-        Args:
+        args:
             key (str): Key of the field.
             value (SingleFieldLinearNormalizer): Normalizer to set.
         """
@@ -162,11 +162,11 @@ class LinearNormalizer(nn.Module):
         """
         Internal method to perform normalization or unnormalization.
 
-        Args:
+        args:
             x: Input data.
             forward (bool, optional): If True, perform normalization; otherwise, unnormalize.
 
-        Returns:
+        returns:
             torch.Tensor: Transformed data.
         """
         if isinstance(x, dict):
@@ -185,10 +185,10 @@ class LinearNormalizer(nn.Module):
         """
         Normalizes the input data.
 
-        Args:
+        args:
             x (Union[Dict, torch.Tensor, np.ndarray]): Input data to normalize.
 
-        Returns:
+        returns:
             torch.Tensor: Normalized data.
         """
         return self._normalize_impl(x, forward=True)
@@ -197,10 +197,10 @@ class LinearNormalizer(nn.Module):
         """
         Unnormalizes the input data.
 
-        Args:
+        args:
             x (Union[Dict, torch.Tensor, np.ndarray]): Data to unnormalize.
 
-        Returns:
+        returns:
             torch.Tensor: Unnormalized data.
         """
         return self._normalize_impl(x, forward=False)
@@ -209,7 +209,7 @@ class LinearNormalizer(nn.Module):
         """
         Retrieves input statistics used for normalization.
 
-        Returns:
+        returns:
             Dict: Input statistics.
 
         Raises:
@@ -230,10 +230,10 @@ class LinearNormalizer(nn.Module):
         """
         Retrieves output statistics after normalization.
 
-        Args:
+        args:
             key (str, optional): Specific key to retrieve stats for.
 
-        Returns:
+        returns:
             Dict: Output statistics.
         """
         input_stats = self.get_input_stats()
@@ -257,7 +257,7 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Initializes the SingleFieldLinearNormalizer.
 
-        Args:
+        args:
             params_dict (nn.ParameterDict, optional): A ParameterDict containing normalization parameters.
                 If None, an empty ParameterDict is initialized.
         """
@@ -270,7 +270,7 @@ class SingleFieldLinearNormalizer(nn.Module):
     @property
     def device(self):
         """
-        Returns the device of the first parameter in the ParameterDict.
+        returns the device of the first parameter in the ParameterDict.
         """
         return next(iter(self.parameters())).device
 
@@ -287,7 +287,7 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Custom method to load parameters from a state_dict.
 
-        Args:
+        args:
             state_dict (dict): State dictionary containing model parameters.
             prefix (str): Prefix for parameter keys.
             local_metadata (dict): Metadata for loading.
@@ -333,7 +333,7 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Fits the normalizer parameters to the provided data.
 
-        Args:
+        args:
             data (Union[torch.Tensor, np.ndarray, zarr.Array]): Input data to fit.
             last_n_dims (int, optional): Number of dimensions to consider as features.
             dtype (torch.dtype, optional): Data type for computations.
@@ -359,11 +359,11 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Creates a SingleFieldLinearNormalizer by fitting to the data.
 
-        Args:
+        args:
             data (Union[torch.Tensor, np.ndarray, zarr.Array]): Data to fit.
             **kwargs: Additional keyword arguments for fitting.
 
-        Returns:
+        returns:
             SingleFieldLinearNormalizer: Fitted normalizer.
         """
         obj = cls()
@@ -380,12 +380,12 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Creates a SingleFieldLinearNormalizer with manually specified parameters.
 
-        Args:
+        args:
             scale (Union[torch.Tensor, np.ndarray]): Scale factors.
             offset (Union[torch.Tensor, np.ndarray]): Offset values.
             input_stats_dict (Dict[str, Union[torch.Tensor, np.ndarray]]): Input statistics.
 
-        Returns:
+        returns:
             SingleFieldLinearNormalizer: Manually configured normalizer.
         """
 
@@ -415,10 +415,10 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Creates an identity SingleFieldLinearNormalizer.
 
-        Args:
+        args:
             dtype (torch.dtype, optional): Data type for the parameters.
 
-        Returns:
+        returns:
             SingleFieldLinearNormalizer: Identity normalizer.
         """
         scale = torch.tensor([1], dtype=dtype)
@@ -435,10 +435,10 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Normalizes the input data.
 
-        Args:
+        args:
             x (Union[torch.Tensor, np.ndarray]): Input data to normalize.
 
-        Returns:
+        returns:
             torch.Tensor: Normalized data.
         """
         return _normalize(x, self.params_dict, forward=True)
@@ -447,10 +447,10 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Unnormalizes the input data.
 
-        Args:
+        args:
             x (Union[torch.Tensor, np.ndarray]): Data to unnormalize.
 
-        Returns:
+        returns:
             torch.Tensor: Unnormalized data.
         """
         return _normalize(x, self.params_dict, forward=False)
@@ -459,7 +459,7 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Retrieves input statistics used for normalization.
 
-        Returns:
+        returns:
             Dict: Input statistics.
         """
         return self.params_dict["input_stats"]
@@ -468,7 +468,7 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Retrieves output statistics after normalization.
 
-        Returns:
+        returns:
             Dict: Output statistics.
         """
         return dict_apply(self.params_dict["input_stats"], self.normalize)
@@ -477,10 +477,10 @@ class SingleFieldLinearNormalizer(nn.Module):
         """
         Allows the normalizer to be called as a function to normalize data.
 
-        Args:
+        args:
             x (Union[torch.Tensor, np.ndarray]): Input data to normalize.
 
-        Returns:
+        returns:
             torch.Tensor: Normalized data.
         """
         return self.normalize(x)
@@ -499,7 +499,7 @@ def _fit(
     """
     Computes normalization parameters based on the input data.
 
-    Args:
+    args:
         data (Union[torch.Tensor, np.ndarray, zarr.Array]): Input data.
         last_n_dims (int, optional): Number of dimensions to consider as features.
         dtype (torch.dtype, optional): Data type for computations.
@@ -509,7 +509,7 @@ def _fit(
         range_eps (float, optional): Epsilon value to avoid division by zero.
         fit_offset (bool, optional): Whether to fit an offset.
 
-    Returns:
+    returns:
         nn.ParameterDict: Computed normalization parameters.
     """
     assert mode in ["limits", "gaussian"], "Mode must be 'limits' or 'gaussian'."
@@ -592,12 +592,12 @@ def _normalize(x, params: nn.ParameterDict, forward: bool = True) -> torch.Tenso
     """
     Applies normalization or unnormalization to the input data.
 
-    Args:
+    args:
         x: Input data.
         params (nn.ParameterDict): Normalization parameters.
         forward (bool, optional): If True, perform normalization; otherwise, unnormalize.
 
-    Returns:
+    returns:
         torch.Tensor: Transformed data.
     """
     assert "scale" in params, "Scale parameter missing in params."

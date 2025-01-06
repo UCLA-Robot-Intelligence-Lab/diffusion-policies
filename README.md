@@ -1,9 +1,29 @@
 # diffusion-policies
 Diffusion Policy and other generative model policies
+## Getting Started
+At the root level, first create the environment:
+```console
+conda env create -f environment.yaml && conda activate diffpolicy
+```
+For training data, you can download training data from the original
+[Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
+repository. Below we use PushT:
+```console
+cd data && wget https://diffusion-policy.cs.columbia.edu/data/training/pusht.zip && unzip pusht.zip && rm -f pusht.zip && cd ..
+```
+Navigate to `diffusion_policy/config`, select the config for
+architecture and modality you want to train for, and change
+the config as necessary (i.e., task). Make sure to `wandb login` if
+you have not already. Then, navigate back up to the
+network architecture folder that you chose and run the
+training script, for example
+```console
+python train_unet_image_policy.py
+```
 
 ### Credit
 The implementations here are not necessarily original. Please reference the original repositories (linked below) literature (cited at the bottom)!
-- [Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
+- [Diffusion Policy](https://github.com/real-stanford/diffusion_policy): see the `README.md` under `diffusion_policy/` for more details on the practical implementation in this repository.
 
 ### Shape Suffixes and Dimension  Key
 This repository annotates tensors with shape suffixes, which simply indicate what you would expect to receive after calling `.shape` on the tensor. To read about why, see [this blog post](https://medium.com/@NoamShazeer/shape-suffixes-good-coding-style-f836e72e24fd) from Noam Shazeer. In this repository, we use the following dimension key:

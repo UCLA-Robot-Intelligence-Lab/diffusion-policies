@@ -88,7 +88,7 @@ class TrainDiffusionUnetImageWorkspace:
                 self.load_checkpoint(path=latest_ckpt_path)
 
         # Configure dataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        dataset = hydra.utils.instantiate(cfg.tasks.dataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 
@@ -100,7 +100,10 @@ class TrainDiffusionUnetImageWorkspace:
         if self.ema_model is not None:
             self.ema_model.set_normalizer(normalizer)
 
-        # Configure learning rate scheduler
+        """
+        Learning rate scheduler updates learning rate dynamically during
+        training.
+        """
         lr_scheduler = get_scheduler(
             cfg.training.lr_scheduler,
             optimizer=self.optimizer,
@@ -110,14 +113,20 @@ class TrainDiffusionUnetImageWorkspace:
             last_epoch=self.global_step - 1,
         )
 
-        # Configure EMA
+        """
+        EMA (exponential moving average) maintains a smoothed
+        version of the model weights. Shown to improve performance,
+        and the weighting of the weights favors the last few epochs.
+        """
         ema: Optional[EMAModel] = None
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
-        # Configure environment runner
+        """
+        The environment runner handles simulating the environment.
+        """
         env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner, output_dir=self.output_dir
+            cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
         # Configure logging with Weights & Biases
@@ -128,7 +137,10 @@ class TrainDiffusionUnetImageWorkspace:
         )
         wandb.config.update({"output_dir": self.output_dir})
 
-        # Configure checkpoint manager
+        """
+        TopK Checkpoint manager works by maintaining top-K model
+        checkpoints based on performance.
+        """
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"), **cfg.checkpoint.topk
         )
@@ -407,5 +419,4 @@ def main(cfg=None):
 
 
 if __name__ == "__main__":
-    # Or, python train_unet_image_policy.py --config-path=../config --config-name=train_unet_image_policy
     main()
