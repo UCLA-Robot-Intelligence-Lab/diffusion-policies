@@ -5,6 +5,10 @@ At the root level, first create the environment:
 ```console
 conda env create -f environment.yaml && conda activate diffpolicy
 ```
+Run setup:
+```console
+python setup.py && pip install -e .
+```
 For training data, you can download training data from the original
 [Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
 repository. Below we use PushT:
