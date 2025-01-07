@@ -3,7 +3,11 @@ Diffusion Policy and other generative model policies
 ## Getting Started
 At the root level, first create the environment:
 ```console
-conda env create -f environment.yaml && conda activate diffpolicy
+conda env create -f environment.yaml
+```
+and activate it:
+```console
+conda activate diffpolicy
 ```
 For training data, you can download training data from the original
 [Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
