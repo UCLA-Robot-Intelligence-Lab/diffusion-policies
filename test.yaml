@@ -1,4 +1,4 @@
-name: diffpolicy
+name: robodiff
 channels:
   - pytorch
   - pytorch3d
@@ -59,8 +59,15 @@ dependencies:
     - robosuite @ https://github.com/cheng-chi/robosuite/archive/277ab9588ad7a4f4b55cf75508b44aa67ec171f0.tar.gz
     - robomimic==0.2.0
     - pytorchvideo==0.1.5
+    # requires librealsense https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md
+    - pyrealsense2==2.51.1.4348
+    # requires apt install libspnav-dev spacenavd; systemctl start spacenavd
+    - spnav @ https://github.com/cheng-chi/spnav/archive/c1c938ebe3cc542db4685e0d13850ff1abfdb943.tar.gz
+    - ur-rtde==1.5.5
+    - atomics==1.0.2
     # pip package required for jpeg-xl
     - imagecodecs==2022.9.26
     - r3m @ https://github.com/facebookresearch/r3m/archive/b2334e726887fa0206962d7984c69c5fb09cceab.tar.gz
     - dm-control==1.0.9
-    - pip install spnav @ https://github.com/cheng-chi/spnav/archive/c1c938ebe3cc542db4685e0d13850ff1abfdb943.tar.gz
+    - pynput==1.7.6
+  
