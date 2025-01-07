@@ -2,10 +2,20 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+data/
+# Ignore these folders
+checkpoints/
+wandb/
+shared/visual_encoders/weights/*
+shared/visual_encoders/dataset/*
+shared/visual_encoders/checkpoints/*
+# Do not ignore gitkeep!
+!shared/visual_encoders/weights/.gitkeep
+!shared/visual_encoders/dataset/.gitkeep
+!shared/visual_encoders/checkpoints/.gitkeep
 # C extensions
 *.so
-
+*.pth
 # Distribution / packaging
 .Python
 build/
@@ -124,7 +134,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
-env/
+# env/
 venv/
 ENV/
 env.bak/
