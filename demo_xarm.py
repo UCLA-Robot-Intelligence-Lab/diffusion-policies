@@ -23,12 +23,38 @@ from shared.utils.real_world.keystroke_counter import KeystrokeCounter, Key
 sys.path.append("/home/u-ril/URIL/xArm-Python-SDK")
 from xarm.wrapper import XArmAPI
 
+
 @click.command()
-@click.option("--robot_ip", "-ri", default="192.168.1.223", help="xArm's IP address e.g. 192.168.1.223")
-@click.option("--init_joints", "-j", is_flag=True, default=True, help="Whether to initialize robot joint configuration in the beginning.")
-@click.option("--frequency", "-f", default=10, type=float, help="Control frequency in Hz.")
-@click.option("--command_latency", "-cl", default=0.01, type=float, help="Latency between receiving SpaceMouse command to executing on Robot in Sec.")
-@click.option("--max_speed", "-ms", default=100, type=float, help="Max speed of the robot in mm/s.")
+@click.option(
+    "--robot_ip",
+    "-ri",
+    default="192.168.1.223",
+    help="xArm's IP address e.g. 192.168.1.223",
+)
+@click.option(
+    "--init_joints",
+    "-j",
+    is_flag=True,
+    default=True,
+    help="Whether to initialize robot joint configuration in the beginning.",
+)
+@click.option(
+    "--frequency", "-f", default=10, type=float, help="Control frequency in Hz."
+)
+@click.option(
+    "--command_latency",
+    "-cl",
+    default=0.01,
+    type=float,
+    help="Latency between receiving SpaceMouse command to executing on Robot in Sec.",
+)
+@click.option(
+    "--max_speed",
+    "-ms",
+    default=100,
+    type=float,
+    help="Max speed of the robot in mm/s.",
+)
 def main(robot_ip, init_joints, frequency, command_latency, max_speed):
     max_speed = max_speed * frequency  # Max displacement per control cycle
     dt = 1 / frequency
@@ -41,7 +67,7 @@ def main(robot_ip, init_joints, frequency, command_latency, max_speed):
     time.sleep(1)
     if init_joints:
         arm.reset(wait=True)
-        
+
     # Set arm mode for servo control
     arm.set_mode(1)  # Servo motion mode
     arm.set_state(0)
@@ -54,7 +80,9 @@ def main(robot_ip, init_joints, frequency, command_latency, max_speed):
     cv2.setNumThreads(1)
 
     with SharedMemoryManager() as shm_manager:
-        with KeystrokeCounter() as key_counter, Spacemouse(shm_manager=shm_manager) as sm:
+        with KeystrokeCounter() as key_counter, Spacemouse(
+            shm_manager=shm_manager
+        ) as sm:
             print("Ready!")
             t_start = time.monotonic()
             iter_idx = 0
@@ -102,6 +130,7 @@ def main(robot_ip, init_joints, frequency, command_latency, max_speed):
                 # Wait until end of cycle
                 precise_wait(t_cycle_end)
                 iter_idx += 1
+
 
 if __name__ == "__main__":
     main()
