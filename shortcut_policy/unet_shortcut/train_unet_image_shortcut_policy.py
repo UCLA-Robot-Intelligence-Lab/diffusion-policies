@@ -27,10 +27,7 @@ from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
 
-# --- CHANGED HERE: import your Shortcut-based policy instead of the diffusion-based one.
-# from diffusion_policy.unet.unet_image_policy import (
-#     DiffusionUnetImagePolicy,
-# )
+# from diffusion_policy.unet.unet_image_policy import DiffusionUnetImagePolicy
 from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
     UnetImageShortcutPolicy,
 )
@@ -59,11 +56,10 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
-        # --- CHANGED HERE: Instantiate your Shortcut-based policy
-        # self.model: DiffusionUnetImagePolicy = hydra.utils.instantiate(cfg.policy)
+        # CHANGED HERE: no functional changes, but using the Shortcut-based policy
         self.model: UnetImageShortcutPolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: Optional[ShortcutUnetImagePolicy] = None
+        self.ema_model: Optional[UnetImageShortcutPolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
@@ -106,10 +102,7 @@ class TrainDiffusionUnetImageWorkspace:
         if self.ema_model is not None:
             self.ema_model.set_normalizer(normalizer)
 
-        """
-        Learning rate scheduler updates learning rate dynamically during
-        training.
-        """
+        # LR scheduler
         lr_scheduler = get_scheduler(
             cfg.training.lr_scheduler,
             optimizer=self.optimizer,
@@ -119,23 +112,17 @@ class TrainDiffusionUnetImageWorkspace:
             last_epoch=self.global_step - 1,
         )
 
-        """
-        EMA (exponential moving average) maintains a smoothed
-        version of the model weights. Shown to improve performance,
-        and the weighting of the weights favors the last few epochs.
-        """
+        # EMA
         ema: Optional[EMAModel] = None
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
-        """
-        The environment runner handles simulating the environment.
-        """
+        # Env runner
         env_runner = hydra.utils.instantiate(
             cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
-        # Configure logging with Weights & Biases
+        # Weights & Biases logging
         wandb_run = wandb.init(
             dir=str(self.output_dir),
             config=OmegaConf.to_container(cfg, resolve=True),
@@ -143,10 +130,7 @@ class TrainDiffusionUnetImageWorkspace:
         )
         wandb.config.update({"output_dir": self.output_dir})
 
-        """
-        TopK Checkpoint manager works by maintaining top-K model
-        checkpoints based on performance.
-        """
+        # TopK checkpoint manager
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"), **cfg.checkpoint.topk
         )
@@ -171,7 +155,6 @@ class TrainDiffusionUnetImageWorkspace:
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-        # Training loop
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
@@ -196,12 +179,11 @@ class TrainDiffusionUnetImageWorkspace:
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
 
-                        # Compute loss (Shortcut approach inside model)
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        # Step optimizer
+                        # Optim step
                         if (
                             self.global_step % cfg.training.gradient_accumulate_every
                             == 0
@@ -214,7 +196,6 @@ class TrainDiffusionUnetImageWorkspace:
                         if cfg.training.use_ema:
                             ema.step(self.model)
 
-                        # Logging
                         raw_loss_cpu = raw_loss.item()
                         tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                         train_losses.append(raw_loss_cpu)
@@ -237,7 +218,6 @@ class TrainDiffusionUnetImageWorkspace:
                         ):
                             break
 
-                # At the end of each epoch, replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
@@ -247,14 +227,13 @@ class TrainDiffusionUnetImageWorkspace:
                     policy = self.ema_model
                 policy.eval()
 
-                # Run rollout
+                # Rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
                     print("Running rollout")
                     runner_log = env_runner.run(policy)
-                    # Log all
                     step_log.update(runner_log)
 
-                # Run validation
+                # Validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
                         val_losses = []
@@ -277,13 +256,11 @@ class TrainDiffusionUnetImageWorkspace:
                                     break
                         if len(val_losses) > 0:
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # Log epoch average validation loss
                             step_log["val_loss"] = val_loss
 
-                # Run diffusion sampling (now actually "shortcut" sampling)
+                # Sampling
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
-                        # Sample trajectory from training set, and evaluate difference
                         batch = dict_apply(
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
@@ -307,24 +284,17 @@ class TrainDiffusionUnetImageWorkspace:
 
                 # Checkpointing
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
-                    # Save checkpoints and snapshots
                     if cfg.checkpoint.save_last_ckpt:
                         self.save_checkpoint()
                     if cfg.checkpoint.save_last_snapshot:
                         self.save_snapshot()
 
-                    # Sanitize metric names
                     metric_dict = {k.replace("/", "_"): v for k, v in step_log.items()}
-
-                    # Manage Top-K checkpoints
                     topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
 
-                # ========= End of Evaluation ==========
                 policy.train()
-
-                # End of epoch logging
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
                 self.global_step += 1
@@ -352,7 +322,6 @@ class TrainDiffusionUnetImageWorkspace:
 
         for key, value in self.__dict__.items():
             if hasattr(value, "state_dict") and hasattr(value, "load_state_dict"):
-                # Modules, optimizers, etc.
                 if key not in exclude_keys:
                     if use_thread:
                         payload["state_dicts"][key] = copy_to_cpu(value.state_dict())
@@ -360,6 +329,7 @@ class TrainDiffusionUnetImageWorkspace:
                         payload["state_dicts"][key] = value.state_dict()
             elif key in include_keys:
                 payload["pickles"][key] = dill.dumps(value)
+
         if use_thread:
             self._saving_thread = threading.Thread(
                 target=lambda: torch.save(payload, path.open("wb"), pickle_module=dill)
@@ -397,12 +367,6 @@ class TrainDiffusionUnetImageWorkspace:
         return payload
 
     def save_snapshot(self, tag="latest"):
-        """
-        Quick loading and saving for research, saves full state of the workspace.
-
-        However, loading a snapshot assumes the code stays exactly the same.
-        Use save_checkpoint for long-term storage.
-        """
         path = pathlib.Path(self.output_dir).joinpath("snapshots", f"{tag}.pkl")
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self, path.open("wb"), pickle_module=dill)
