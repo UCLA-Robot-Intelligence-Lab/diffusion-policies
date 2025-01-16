@@ -145,12 +145,10 @@ class UnetImageShortcutPolicy(nn.Module):
         # z0 is random noise in [ B, T, Fa ]
         z0 = torch.randn(size=(B, T, Fa), dtype=dtype, device=device)
 
-        # --- CHANGED HERE: 2-step inference instead of many-step
         traj = self.shortcut_model.sample_2step_shortcut(
             z0=z0, cond_BG=cond_BG
         )
 
-        print("Using 2-step shortcut sampling!")
         action_pred_BTFa = traj[-1]
         action_pred_BTFa = normalizer["action"].unnormalize(action_pred_BTFa)
 

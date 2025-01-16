@@ -73,7 +73,6 @@ class ShortcutModel:
 
         return traj
 
-    # --- CHANGED HERE: Added a new 2-step sampling method
     @torch.no_grad()
     def sample_2step_shortcut(self, z0=None, **model_kwargs):
         """

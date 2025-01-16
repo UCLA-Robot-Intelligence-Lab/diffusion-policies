@@ -27,7 +27,6 @@ from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
 
-# from diffusion_policy.unet.unet_image_policy import DiffusionUnetImagePolicy
 from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
     UnetImageShortcutPolicy,
 )
@@ -56,7 +55,6 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
-        # CHANGED HERE: no functional changes, but using the Shortcut-based policy
         self.model: UnetImageShortcutPolicy = hydra.utils.instantiate(cfg.policy)
 
         self.ema_model: Optional[UnetImageShortcutPolicy] = None
@@ -229,7 +227,6 @@ class TrainDiffusionUnetImageWorkspace:
 
                 # Rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
-                    print("Running rollout")
                     runner_log = env_runner.run(policy)
                     step_log.update(runner_log)
 
@@ -269,10 +266,7 @@ class TrainDiffusionUnetImageWorkspace:
                         gt_action = batch["action"]
 
                         result = policy.predict_action(obs_dict)
-                        print("Made it here in train.")
                         pred_action = result["action_pred"]
-                        print("pred action mean: ", pred_action.mean())
-                        print("gt_action mean: ", gt_action.mean())
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
                         del batch

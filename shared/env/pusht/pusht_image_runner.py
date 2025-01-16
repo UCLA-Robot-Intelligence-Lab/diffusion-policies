@@ -142,6 +142,7 @@ class PushTImageRunner:
         # allocate data
         all_video_paths = [None] * n_inits
         all_rewards = [None] * n_inits
+        all_coverage = [None] * n_inits
 
         for chunk_idx in range(n_chunks):
 
@@ -174,6 +175,7 @@ class PushTImageRunner:
             )
             done = False
             step_count = 0
+            coverage_values = []
             while not done:
                 step_count += 1
 
@@ -198,6 +200,12 @@ class PushTImageRunner:
                 action = np_action_dict["action"]
 
                 obs, reward, done, info = env.step(action)
+                for env_idx, info_dict in enumerate(info):
+                    coverage = info_dict.get("coverage", None)
+                    if coverage is not None:
+                        if len(coverage_values) <= env_idx:
+                            coverage_values.append([])
+                        coverage_values[env_idx].append(coverage)
 
                 done = np.all(done)
                 past_action = action
@@ -208,6 +216,7 @@ class PushTImageRunner:
             all_rewards[this_global_slice] = env.call("get_attr", "reward")[
                 this_local_slice
             ]
+            all_coverage[this_global_slice] = coverage_values
 
         _ = env.reset()
         max_rewards = collections.defaultdict(list)
@@ -216,8 +225,10 @@ class PushTImageRunner:
             seed = self.env_seeds[i]
             prefix = self.env_prefixs[i]
             max_reward = np.max(all_rewards[i])
+            max_coverage = np.max(all_coverage[i])
             max_rewards[prefix].append(max_reward)
             log_data[prefix + f"sim_max_reward_{seed}"] = max_reward
+            log_data[prefix + f"sim_max_coverage_{seed}"] = max_coverage
             video_path = all_video_paths[i]
             if video_path is not None:
                 try:

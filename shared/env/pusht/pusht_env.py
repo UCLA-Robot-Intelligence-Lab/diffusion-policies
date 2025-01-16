@@ -87,6 +87,8 @@ class PushTEnv(gym.Env):
         self.latest_action = None
         self.reset_to_state = reset_to_state
 
+        self.coverage = None
+
     def reset(self):
         seed = self._seed
         self._setup()
@@ -144,6 +146,8 @@ class PushTEnv(gym.Env):
         observation = self._get_obs()
         info = self._get_info()
 
+        self.coverage = coverage
+
         return observation, reward, done, info
 
     def render(self, mode):
@@ -191,6 +195,7 @@ class PushTEnv(gym.Env):
             "block_pose": np.array(list(self.block.position) + [self.block.angle]),
             "goal_pose": self.goal_pose,
             "n_contacts": n_contact_points_per_step,
+            "coverage": self.coverage
         }
         return info
 
