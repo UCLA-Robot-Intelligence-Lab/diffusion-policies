@@ -20,6 +20,7 @@ import random
 import wandb
 import tqdm
 import numpy as np
+import time
 
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
@@ -127,6 +128,13 @@ class TrainDiffusionUnetImageWorkspace:
             **cfg.logging,
         )
         wandb.config.update({"output_dir": self.output_dir})
+
+        # For measuring shortcut speed ups
+        step_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
+        training_steps = []
+        time_data = {f"Time_{s}": [] for s in step_sizes}
+        plot_keys = [f"Step Size {s}" for s in step_sizes]
+        plot_log_interval = 1  # Adjust as needed
 
         # TopK checkpoint manager
         topk_manager = TopKCheckpointManager(
@@ -255,7 +263,7 @@ class TrainDiffusionUnetImageWorkspace:
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
                             step_log["val_loss"] = val_loss
 
-                # Sampling
+                # ========= Sampling =========
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
                         batch = dict_apply(
@@ -265,10 +273,39 @@ class TrainDiffusionUnetImageWorkspace:
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
 
+                        # Normal sampling with "predict_action"
+                        # Needs to be fixed, looks really strange
                         result = policy.predict_action(obs_dict)
                         pred_action = result["action_pred"]
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
+
+                        # ======== Speed Test ========
+                        for s in step_sizes:
+                            t0 = time.time()
+                            result_n = policy.predict_action_shortcut(obs_dict, s)
+                            t1 = time.time()
+
+                            pred_n = result_n["action_pred"]
+                            mse_n = torch.nn.functional.mse_loss(pred_n, gt_action)
+
+                            time_elapsed = t1 - t0
+                            time_data[f"Time_{s}"].append(time_elapsed)
+
+                        training_steps.append(self.global_step)
+
+                        if self.global_step % plot_log_interval == 0:
+                            wandb_run.log({
+                                "Shortcut Speed Test": wandb.plot.line_series(
+                                    xs=training_steps,
+                                    ys=[time_data[f"Time_{s}"] for s in step_sizes],
+                                    keys=plot_keys,
+                                    title="Shortcut Speed Test Over Training Steps",
+                                    xname="Training Step"
+                                )
+                            })
+
+                        # ======== Cleanup ========
                         del batch
                         del obs_dict
                         del gt_action

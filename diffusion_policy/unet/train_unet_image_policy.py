@@ -242,7 +242,7 @@ class TrainDiffusionUnetImageWorkspace:
                 policy.eval()
 
                 # Run rollout
-                if (self.epoch % cfg.training.rollout_every) == 0:
+                if (self.epoch % cfg.training.rollout_every) == 0:2
                     runner_log = env_runner.run(policy)
                     # Log all
                     step_log.update(runner_log)

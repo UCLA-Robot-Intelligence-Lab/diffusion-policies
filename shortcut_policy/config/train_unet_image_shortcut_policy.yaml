@@ -94,7 +94,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
-  device: "cuda:0"
+  device: "cuda:1"
   seed: 42
   debug: False
   resume: False
@@ -118,6 +118,7 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  do_shortcut_speed_test: true
 
 logging:
   project: diffusion_policies

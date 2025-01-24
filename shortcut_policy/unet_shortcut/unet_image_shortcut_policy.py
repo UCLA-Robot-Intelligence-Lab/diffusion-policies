@@ -114,6 +114,10 @@ class UnetImageShortcutPolicy(nn.Module):
 
     # ========= INFERENCE =========
     def predict_action(self, obs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        Default inference: for example, 2-step approach.
+        You may keep or revert. We'll do 2-step here by default.
+        """
         normalizer = self.normalizer
         obs_encoder = self.obs_encoder
         global_obs_cond = self.global_obs_cond
@@ -129,14 +133,11 @@ class UnetImageShortcutPolicy(nn.Module):
         # Normalize obs
         normalized_obs = normalizer.normalize(obs)
 
-        cond_BTL = None
         cond_BG = None
         if global_obs_cond:
-            # Prep [ B, To, ... ] -> [ B*To, ... ]
             flat_normalized_obs = dict_apply(
                 normalized_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
             )
-            # [ B*To, C, H, W ] -> [ B*To, Fo ] -> [ B, G ]
             normalized_obs_feats = obs_encoder(flat_normalized_obs)
             cond_BG = normalized_obs_feats.reshape(B, -1)
         else:
@@ -145,14 +146,52 @@ class UnetImageShortcutPolicy(nn.Module):
         # z0 is random noise in [ B, T, Fa ]
         z0 = torch.randn(size=(B, T, Fa), dtype=dtype, device=device)
 
-        traj = self.shortcut_model.sample_2step_shortcut(
-            z0=z0, cond_BG=cond_BG
-        )
-
+        # 2-step approach
+        traj = self.shortcut_model.sample_2step_shortcut(z0=z0, cond_BG=cond_BG)
         action_pred_BTFa = traj[-1]
         action_pred_BTFa = normalizer["action"].unnormalize(action_pred_BTFa)
 
-        # We slice out the final portion of the horizon for the actual actions
+        # Slice out the final portion for the actual actions
+        obs_act_horizon = To + Ta - 1
+        action_BTaFa = action_pred_BTFa[:, obs_act_horizon - Ta : obs_act_horizon]
+
+        result = {"action": action_BTaFa, "action_pred": action_pred_BTFa}
+        return result
+
+    # --- CHANGED HERE: new method to do custom # of Euler steps
+    def predict_action_shortcut(self, obs: Dict[str, torch.Tensor], num_steps: int):
+        """
+        Inference for a user-specified # of Euler steps.
+        This calls sample_ode_shortcut(..., num_steps=N).
+        """
+        normalizer = self.normalizer
+        obs_encoder = self.obs_encoder
+        global_obs_cond = self.global_obs_cond
+        device = self.device
+        dtype = self.dtype
+        T = self.horizon
+        Ta = self.num_action_steps
+        To = self.num_obs_steps
+        B = obs["image"].shape[0]
+
+        normalized_obs = normalizer.normalize(obs)
+        cond_BG = None
+        if global_obs_cond:
+            flat_normalized_obs = dict_apply(
+                normalized_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
+            )
+            normalized_obs_feats = obs_encoder(flat_normalized_obs)
+            cond_BG = normalized_obs_feats.reshape(B, -1)
+
+        z0 = torch.randn(size=(B, T, self.action_dim_Fa), dtype=dtype, device=device)
+
+        # Now do num_steps Euler steps
+        traj = self.shortcut_model.sample_ode_shortcut(
+            z0=z0, num_steps=num_steps, cond_BG=cond_BG
+        )
+        action_pred_BTFa = traj[-1]
+        action_pred_BTFa = normalizer["action"].unnormalize(action_pred_BTFa)
+
         obs_act_horizon = To + Ta - 1
         action_BTaFa = action_pred_BTFa[:, obs_act_horizon - Ta : obs_act_horizon]
 
