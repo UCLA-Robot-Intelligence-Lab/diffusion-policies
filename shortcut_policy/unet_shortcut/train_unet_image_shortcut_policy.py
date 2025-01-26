@@ -21,6 +21,7 @@ import wandb
 import tqdm
 import numpy as np
 import time
+import matplotlib.pyplot as plt
 
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
@@ -295,15 +296,17 @@ class TrainDiffusionUnetImageWorkspace:
                         training_steps.append(self.global_step)
 
                         if self.global_step % plot_log_interval == 0:
-                            wandb_run.log({
-                                "Shortcut Speed Test": wandb.plot.line_series(
-                                    xs=training_steps,
-                                    ys=[time_data[f"Time_{s}"] for s in step_sizes],
-                                    keys=plot_keys,
-                                    title="Shortcut Speed Test Over Training Steps",
-                                    xname="Training Step"
-                                )
-                            })
+                            wandb_run.log(
+                                {
+                                    "Shortcut Speed Test": wandb.plot.line_series(
+                                        xs=training_steps,
+                                        ys=[time_data[f"Time_{s}"] for s in step_sizes],
+                                        keys=plot_keys,
+                                        title="Shortcut Speed Test Over Training Steps",
+                                        xname="Training Step",
+                                    )
+                                }
+                            )
 
                         # ======== Cleanup ========
                         del batch

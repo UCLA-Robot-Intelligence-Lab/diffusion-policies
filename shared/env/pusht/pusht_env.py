@@ -195,7 +195,7 @@ class PushTEnv(gym.Env):
             "block_pose": np.array(list(self.block.position) + [self.block.angle]),
             "goal_pose": self.goal_pose,
             "n_contacts": n_contact_points_per_step,
-            "coverage": self.coverage
+            "coverage": self.coverage,
         }
         return info
 

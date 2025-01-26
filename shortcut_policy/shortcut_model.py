@@ -1,5 +1,6 @@
 import torch
 
+
 class ShortcutModel:
     def __init__(self, model=None, num_steps=1000, device="cuda"):
         self.model = model
