@@ -2,9 +2,9 @@ import torch
 
 
 class ShortcutModel:
-    def __init__(self, model=None, num_steps=1000, device="cuda"):
+    def __init__(self, model=None, num_inference_steps=128, device="cuda"):
         self.model = model
-        self.num_steps = num_steps
+        self.num_inference_steps = num_inference_steps
         self.device = device
 
     def get_train_tuple(self, z0=None, z1=None):
@@ -52,22 +52,22 @@ class ShortcutModel:
         return z_t, t.squeeze(), target, distance * 2
 
     @torch.no_grad()
-    def sample_ode_shortcut(self, z0=None, num_steps=None, **model_kwargs):
+    def sample_ode_shortcut(self, z0=None, num_inference_steps=None, **model_kwargs):
         """
-        This method does standard small-step (num_steps) Euler integration.
+        This method does standard small-step (num_inference_steps) Euler integration.
         We'll leave it unchanged, but it does not show the big-step advantage.
         """
-        if num_steps is None:
-            num_steps = self.num_steps
+        if num_inference_steps is None:
+            num_inference_steps = self.num_inference_steps
 
-        dt = 1.0 / num_steps
+        dt = 1.0 / num_inference_steps
         traj = []
         z = z0.clone()
 
         traj.append(z.clone())
 
-        for i in range(num_steps):
-            t = torch.ones((z.shape[0],), device=self.device) * (i / num_steps)
+        for i in range(num_inference_steps):
+            t = torch.ones((z.shape[0],), device=self.device) * (i / num_inference_steps)
             pred = self.model(z, t, distance=dt, **model_kwargs)
             z = z + pred * dt
             traj.append(z.clone())

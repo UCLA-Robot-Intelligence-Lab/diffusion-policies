@@ -12,6 +12,7 @@ exp_name: "default"
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
+num_inference_steps: 1
 n_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
@@ -51,8 +52,7 @@ policy:
   horizon: ${horizon}
   num_action_steps: ${eval:'${num_action_steps}+${n_latency_steps}'}
   num_obs_steps: ${num_obs_steps}
-  num_inference_steps: 100
-  num_steps: 128
+  num_inference_steps: ${num_inference_steps}
   global_obs_cond: ${global_obs_cond}
   # crop_shape: null
   embed_dim_D: 128

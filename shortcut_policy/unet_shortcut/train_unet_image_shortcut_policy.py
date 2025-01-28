@@ -77,10 +77,10 @@ class TrainDiffusionUnetImageWorkspace:
         self.epoch = 0
 
         # For plotting w/matplotlib
-        self.step_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
+        self.num_shortcut_steps = [1, 2, 4, 8, 16, 32, 64, 128]
         self.training_steps = []
-        self.time_data = {f"Time_{s}": [] for s in self.step_sizes}
-        self.mse_data = {f"MSE_{s}": [] for s in self.step_sizes}
+        self.time_data = {f"Time_{s}": [] for s in self.num_shortcut_steps}
+        self.mse_data = {f"MSE_{s}": [] for s in self.num_shortcut_steps}
         self.plot_log_interval = 1
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -98,7 +98,7 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_ax.set_xlabel("Global Step")
         self.mse_ax.set_ylabel("Mean Squared Error")
         self.mse_ax.set_title("MSE across step sizes")
-        self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_step_size.png")
+        self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_num_steps.png")
 
     @property
     def output_dir(self):
@@ -116,7 +116,7 @@ class TrainDiffusionUnetImageWorkspace:
         self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
         speed_legend_handles = []
 
-        for s in self.step_sizes:
+        for s in self.num_shortcut_steps:
             steps = self.training_steps
             times = self.time_data[f"Time_{s}"]
             if len(steps) > 1:
@@ -125,19 +125,19 @@ class TrainDiffusionUnetImageWorkspace:
                     times,
                     linestyle="-",
                     alpha=0.5,
-                    color=f"C{self.step_sizes.index(s)}",
+                    color=f"C{self.num_shortcut_steps.index(s)}",
                 )
             self.speed_ax.scatter(
-                steps, times, s=20, color=f"C{self.step_sizes.index(s)}"
+                steps, times, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
             )
             speed_legend_handles.append(
                 mlines.Line2D(
                     [],
                     [],
-                    color=f"C{self.step_sizes.index(s)}",
+                    color=f"C{self.num_shortcut_steps.index(s)}",
                     marker="o",
                     linestyle="",
-                    label=f"Step size: {s}",
+                    label=f"Steps: {s}",
                 )
             )
         self.speed_ax.legend(
@@ -163,7 +163,7 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_ax.set_title("Shortcut Policy MSE across step sizes")
         mse_legend_handles = []
 
-        for s in self.step_sizes:
+        for s in self.num_shortcut_steps:
             steps = self.training_steps
             mse = self.mse_data[f"MSE_{s}"]
             if len(steps) > 1:
@@ -172,17 +172,17 @@ class TrainDiffusionUnetImageWorkspace:
                     mse,
                     linestyle="-",
                     alpha=0.5,
-                    color=f"C{self.step_sizes.index(s)}",
+                    color=f"C{self.num_shortcut_steps.index(s)}",
                 )
-            self.mse_ax.scatter(steps, mse, s=20, color=f"C{self.step_sizes.index(s)}")
+            self.mse_ax.scatter(steps, mse, s=20, color=f"C{self.num_shortcut_steps.index(s)}")
             mse_legend_handles.append(
                 mlines.Line2D(
                     [],
                     [],
-                    color=f"C{self.step_sizes.index(s)}",
+                    color=f"C{self.num_shortcut_steps.index(s)}",
                     marker="o",
                     linestyle="",
-                    label=f"Step size: {s}",
+                    label=f"Steps: {s}",
                 )
             )
         self.mse_ax.legend(handles=mse_legend_handles, fontsize=8, loc="upper right")
@@ -196,7 +196,7 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_fig.tight_layout()
         self.mse_fig.savefig(self.mse_path)
         wandb.log(
-            {"shortcut_mse_per_step_size": wandb.Image(self.mse_path)},
+            {"shortcut_mse_per_num_steps": wandb.Image(self.mse_path)},
             step=self.global_step,
         )
 
@@ -389,13 +389,13 @@ class TrainDiffusionUnetImageWorkspace:
                         gt_action = batch["action"]
 
                         # Normal sampling with "predict_action"
-                        result = policy.predict_action(obs_dict)
+                        result = policy.predict_action_shortcut(obs_dict)
                         pred_action = result["action_pred"]
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
 
                         # ======== Speed Test ========
-                        for s in self.step_sizes:
+                        for s in self.num_shortcut_steps:
                             t0 = time.time()
                             result_n = policy.predict_action_shortcut(obs_dict, s)
                             t1 = time.time()

@@ -36,7 +36,7 @@ class UnetImageShortcutPolicy(nn.Module):
         horizon: int,
         num_action_steps: int,
         num_obs_steps: int,
-        num_steps: int = 100,
+        num_inference_steps: int = 128,
         global_obs_cond: bool = True,
         embed_dim_D: int = 256,
         down_dims: Tuple[int] = (256, 512, 1024),
@@ -83,11 +83,12 @@ class UnetImageShortcutPolicy(nn.Module):
         self.action_dim_Fa = action_dim_Fa
         self.num_action_steps = num_action_steps
         self.num_obs_steps = num_obs_steps
+        self.num_inference_steps = num_inference_steps
         self.global_obs_cond = global_obs_cond
 
         # The ShortcutModel wrapper
         self.shortcut_model = ShortcutModel(
-            self.forward_model, num_steps=num_steps, device=self.device
+            self.forward_model, num_inference_steps=num_inference_steps, device=self.device
         )
         self.kwargs = kwargs
 
@@ -159,11 +160,13 @@ class UnetImageShortcutPolicy(nn.Module):
         return result
 
     # --- CHANGED HERE: new method to do custom # of Euler steps
-    def predict_action_shortcut(self, obs: Dict[str, torch.Tensor], num_steps: int):
+    def predict_action_shortcut(self, obs: Dict[str, torch.Tensor], num_inference_steps: int = None):
         """
         Inference for a user-specified # of Euler steps.
-        This calls sample_ode_shortcut(..., num_steps=N).
+        This calls sample_ode_shortcut(..., num_inference_steps=N).
         """
+        num_inference_steps = num_inference_steps or self.num_inference_steps
+        print("Predict action shortcut with : ", num_inference_steps)
         normalizer = self.normalizer
         obs_encoder = self.obs_encoder
         global_obs_cond = self.global_obs_cond
@@ -185,9 +188,9 @@ class UnetImageShortcutPolicy(nn.Module):
 
         z0 = torch.randn(size=(B, T, self.action_dim_Fa), dtype=dtype, device=device)
 
-        # Now do num_steps Euler steps
+        # Now do num_inference_steps Euler steps
         traj = self.shortcut_model.sample_ode_shortcut(
-            z0=z0, num_steps=num_steps, cond_BG=cond_BG
+            z0=z0, num_inference_steps=num_inference_steps, cond_BG=cond_BG
         )
         action_pred_BTFa = traj[-1]
         action_pred_BTFa = normalizer["action"].unnormalize(action_pred_BTFa)
