@@ -166,7 +166,6 @@ class UnetImageShortcutPolicy(nn.Module):
         This calls sample_ode_shortcut(..., num_inference_steps=N).
         """
         num_inference_steps = num_inference_steps or self.num_inference_steps
-        print("Predict action shortcut with : ", num_inference_steps)
         normalizer = self.normalizer
         obs_encoder = self.obs_encoder
         global_obs_cond = self.global_obs_cond

@@ -20,6 +20,7 @@ import random
 import wandb
 import tqdm
 import numpy as np
+import time
 
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
@@ -242,7 +243,7 @@ class TrainDiffusionUnetImageWorkspace:
                 policy.eval()
 
                 # Run rollout
-                if (self.epoch % cfg.training.rollout_every) == 0:2:
+                if (self.epoch % cfg.training.rollout_every) == 0:
                     runner_log = env_runner.run(policy)
                     # Log all
                     step_log.update(runner_log)
@@ -284,12 +285,19 @@ class TrainDiffusionUnetImageWorkspace:
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
 
+                        t0 = time.time()
                         result = policy.predict_action(obs_dict)
+                        t1 = time.time()
+
                         pred_action = result["action_pred"]
-                        print("pred action mean: ", pred_action.mean())
-                        print("gt_action mean: ", gt_action.mean())
+
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
+
+                        # Track time elapsed for diffusion policy
+                        elapsed_time = t1 - t0
+                        step_log["time_elapsed_predict_action"] = elapsed_time
+
                         del batch
                         del obs_dict
                         del gt_action
