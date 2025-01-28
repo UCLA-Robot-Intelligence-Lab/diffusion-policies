@@ -21,7 +21,11 @@ import wandb
 import tqdm
 import numpy as np
 import time
+import matplotlib
+
+matplotlib.use("Agg")  # Non-GUI backend
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
@@ -48,7 +52,7 @@ class TrainDiffusionUnetImageWorkspace:
 
     def __init__(self, cfg: OmegaConf, output_dir: Optional[str] = None):
         self.cfg = cfg
-        self._output_dir = output_dir
+        self._output_dir = cfg.output_dir if "output_dir" in cfg else output_dir
         self._saving_thread = None
 
         # Set seed
@@ -72,12 +76,129 @@ class TrainDiffusionUnetImageWorkspace:
         self.global_step = 0
         self.epoch = 0
 
+        # For plotting w/matplotlib
+        self.step_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
+        self.training_steps = []
+        self.time_data = {f"Time_{s}": [] for s in self.step_sizes}
+        self.mse_data = {f"MSE_{s}": [] for s in self.step_sizes}
+        self.plot_log_interval = 1
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        print(f"Output directory set to: {self.output_dir}")
+
+        # Speed test plot
+        self.speed_fig, self.speed_ax = plt.subplots(figsize=(10, 6))
+        self.speed_ax.set_xlabel("Global Step")
+        self.speed_ax.set_ylabel("Time Elapsed (s)")
+        self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
+        self.speed_path = os.path.join(self.output_dir, "shortcut_speed_test.png")
+
+        # MSE plot
+        self.mse_fig, self.mse_ax = plt.subplots(figsize=(10, 6))
+        self.mse_ax.set_xlabel("Global Step")
+        self.mse_ax.set_ylabel("Mean Squared Error")
+        self.mse_ax.set_title("MSE across step sizes")
+        self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_step_size.png")
+
     @property
     def output_dir(self):
         output_dir = self._output_dir
         if output_dir is None:
             output_dir = HydraConfig.get().runtime.output_dir
         return output_dir
+
+    def update_plot(self):
+
+        # Speed test plot
+        self.speed_ax.clear()
+        self.speed_ax.set_xlabel("Global Step")
+        self.speed_ax.set_ylabel("Time Elapsed (s)")
+        self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
+        speed_legend_handles = []
+
+        for s in self.step_sizes:
+            steps = self.training_steps
+            times = self.time_data[f"Time_{s}"]
+            if len(steps) > 1:
+                self.speed_ax.plot(
+                    steps,
+                    times,
+                    linestyle="-",
+                    alpha=0.5,
+                    color=f"C{self.step_sizes.index(s)}",
+                )
+            self.speed_ax.scatter(
+                steps, times, s=20, color=f"C{self.step_sizes.index(s)}"
+            )
+            speed_legend_handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    color=f"C{self.step_sizes.index(s)}",
+                    marker="o",
+                    linestyle="",
+                    label=f"Step size: {s}",
+                )
+            )
+        self.speed_ax.legend(
+            handles=speed_legend_handles, fontsize=8, loc="upper right"
+        )
+        self.speed_ax.set_yticks(
+            np.linspace(
+                min(min(self.time_data.values())),
+                max(max(self.time_data.values())),
+                num=20,
+            )
+        )
+        self.speed_fig.tight_layout()
+        self.speed_fig.savefig(self.speed_path)
+        wandb.log(
+            {"shortcut_speed_test": wandb.Image(self.speed_path)}, step=self.global_step
+        )
+
+        # MSE plot
+        self.mse_ax.clear()
+        self.mse_ax.set_xlabel("Global Step")
+        self.mse_ax.set_ylabel("Mean Squared Error")
+        self.mse_ax.set_title("Shortcut Policy MSE across step sizes")
+        mse_legend_handles = []
+
+        for s in self.step_sizes:
+            steps = self.training_steps
+            mse = self.mse_data[f"MSE_{s}"]
+            if len(steps) > 1:
+                self.mse_ax.plot(
+                    steps,
+                    mse,
+                    linestyle="-",
+                    alpha=0.5,
+                    color=f"C{self.step_sizes.index(s)}",
+                )
+            self.mse_ax.scatter(steps, mse, s=20, color=f"C{self.step_sizes.index(s)}")
+            mse_legend_handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    color=f"C{self.step_sizes.index(s)}",
+                    marker="o",
+                    linestyle="",
+                    label=f"Step size: {s}",
+                )
+            )
+        self.mse_ax.legend(handles=mse_legend_handles, fontsize=8, loc="upper right")
+        self.mse_ax.set_yticks(
+            np.linspace(
+                min(min(self.mse_data.values())),
+                max(max(self.mse_data.values())),
+                num=20,
+            )
+        )
+        self.mse_fig.tight_layout()
+        self.mse_fig.savefig(self.mse_path)
+        wandb.log(
+            {"shortcut_mse_per_step_size": wandb.Image(self.mse_path)},
+            step=self.global_step,
+        )
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -129,13 +250,6 @@ class TrainDiffusionUnetImageWorkspace:
             **cfg.logging,
         )
         wandb.config.update({"output_dir": self.output_dir})
-
-        # For measuring shortcut speed ups
-        step_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
-        training_steps = []
-        time_data = {f"Time_{s}": [] for s in step_sizes}
-        plot_keys = [f"Step Size {s}" for s in step_sizes]
-        plot_log_interval = 1  # Adjust as needed
 
         # TopK checkpoint manager
         topk_manager = TopKCheckpointManager(
@@ -275,14 +389,13 @@ class TrainDiffusionUnetImageWorkspace:
                         gt_action = batch["action"]
 
                         # Normal sampling with "predict_action"
-                        # Needs to be fixed, looks really strange
                         result = policy.predict_action(obs_dict)
                         pred_action = result["action_pred"]
                         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
                         step_log["train_action_mse_error"] = mse.item()
 
                         # ======== Speed Test ========
-                        for s in step_sizes:
+                        for s in self.step_sizes:
                             t0 = time.time()
                             result_n = policy.predict_action_shortcut(obs_dict, s)
                             t1 = time.time()
@@ -291,22 +404,13 @@ class TrainDiffusionUnetImageWorkspace:
                             mse_n = torch.nn.functional.mse_loss(pred_n, gt_action)
 
                             time_elapsed = t1 - t0
-                            time_data[f"Time_{s}"].append(time_elapsed)
+                            self.time_data[f"Time_{s}"].append(time_elapsed)
+                            self.mse_data[f"MSE_{s}"].append(mse_n.item())
 
-                        training_steps.append(self.global_step)
+                        self.training_steps.append(self.global_step)
 
-                        if self.global_step % plot_log_interval == 0:
-                            wandb_run.log(
-                                {
-                                    "Shortcut Speed Test": wandb.plot.line_series(
-                                        xs=training_steps,
-                                        ys=[time_data[f"Time_{s}"] for s in step_sizes],
-                                        keys=plot_keys,
-                                        title="Shortcut Speed Test Over Training Steps",
-                                        xname="Training Step",
-                                    )
-                                }
-                            )
+                        if self.global_step % self.plot_log_interval == 0:
+                            self.update_plot()
 
                         # ======== Cleanup ========
                         del batch
@@ -390,7 +494,12 @@ class TrainDiffusionUnetImageWorkspace:
                 self.__dict__[key] = dill.loads(payload["pickles"][key])
 
     def load_checkpoint(
-        self, path=None, tag="latest", exclude_keys=None, include_keys=None, **kwargs
+        self,
+        path=None,
+        tag="latest",
+        exclude_keys=None,
+        include_keys=None,
+        **kwargs,
     ):
         if path is None:
             path = self.get_checkpoint_path(tag=tag)
