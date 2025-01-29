@@ -416,14 +416,12 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name=pathlib.Path(__file__).stem,
+    config_name="train_unet_image_policy_ddim",
 )
-def main(cfg=None):
+def main(cfg):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
-    if cfg is None:
-        with initialize(config_path="../config"):
-            cfg = compose(config_name="train_unet_image_policy")
     workspace.run()
+
 
 
 if __name__ == "__main__":

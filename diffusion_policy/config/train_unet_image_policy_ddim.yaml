@@ -1,18 +1,21 @@
+
 defaults:
   - _self_
   - tasks: pusht_image
 
-name: train_diffusion_unet_image_${num_inference_steps}
+name: train_diffusion_unet_image_ddim_${num_inference_steps}
 _target_: diffusion_policy.unet.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
 
 task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
+device: "cuda:6"
+
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
-num_inference_steps: 100
+num_inference_steps: 16
 n_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
@@ -25,12 +28,12 @@ policy:
   shape_meta: ${shape_meta}
 
   noise_scheduler:
-    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
     num_train_timesteps: 100
     beta_start: 0.0001
     beta_end: 0.02
     beta_schedule: squaredcos_cap_v2
-    variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+    #    variance_type: fixed_small
     clip_sample: True # required when predict_epsilon=False
     prediction_type: epsilon # or sample
 
@@ -94,7 +97,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
-  device: "cuda:6"
+  device: ${device}
   seed: 42
   debug: False
   resume: False
