@@ -10,21 +10,19 @@ import math
 import dill
 import wandb.sdk.data_types.video as wv
 
+import robomimic.utils.file_utils as FileUtils
+import robomimic.utils.env_utils as EnvUtils
+import robomimic.utils.obs_utils as ObsUtils
+
 from shared.utils.gym.async_vector_env import AsyncVectorEnv
 from shared.utils.gym.multistep_wrapper import MultiStepWrapper
-from shared.utils.gym.sync_vector_env import SyncVectorEnv
 from shared.utils.gym.video_recording_wrapper import (
     VideoRecorder,
     VideoRecordingWrapper,
 )
+from shared.env.robomimic.robomimic_image_wrapper import RobomimicImageWrapper
 from shared.model.common.rotation_transformer import RotationTransformer
 from shared.utils.pytorch_util import dict_apply
-
-
-from diffusion_policy.env.robomimic.robomimic_image_wrapper import RobomimicImageWrapper
-import robomimic.utils.file_utils as FileUtils
-import robomimic.utils.env_utils as EnvUtils
-import robomimic.utils.obs_utils as ObsUtils
 
 
 def create_env(env_meta, shape_meta, enable_render=True):
