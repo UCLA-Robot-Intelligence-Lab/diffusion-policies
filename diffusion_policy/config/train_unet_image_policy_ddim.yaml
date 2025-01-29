@@ -10,12 +10,12 @@ task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
-device: "cuda:6"
+device: "cuda:7"
 
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
-num_inference_steps: 16
+num_inference_steps: 10
 n_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
