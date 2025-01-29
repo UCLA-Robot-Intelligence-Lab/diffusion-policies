@@ -5,6 +5,8 @@ defaults:
 name: train_diffusion_unet_image_${num_inference_steps}
 _target_: shortcut_policy.unet_shortcut.train_unet_image_shortcut_policy.TrainDiffusionUnetImageWorkspace
 
+device: "cuda:0"
+
 task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
@@ -94,7 +96,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
-  device: "cuda:1"
+  device: ${device}
   seed: 42
   debug: False
   resume: False

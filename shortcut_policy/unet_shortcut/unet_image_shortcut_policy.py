@@ -88,7 +88,9 @@ class UnetImageShortcutPolicy(nn.Module):
 
         # The ShortcutModel wrapper
         self.shortcut_model = ShortcutModel(
-            self.forward_model, num_inference_steps=num_inference_steps, device=self.device
+            self.forward_model,
+            num_inference_steps=num_inference_steps,
+            device=self.device,
         )
         self.kwargs = kwargs
 
@@ -160,7 +162,9 @@ class UnetImageShortcutPolicy(nn.Module):
         return result
 
     # --- CHANGED HERE: new method to do custom # of Euler steps
-    def predict_action_shortcut(self, obs: Dict[str, torch.Tensor], num_inference_steps: int = None):
+    def predict_action_shortcut(
+        self, obs: Dict[str, torch.Tensor], num_inference_steps: int = None
+    ):
         """
         Inference for a user-specified # of Euler steps.
         This calls sample_ode_shortcut(..., num_inference_steps=N).

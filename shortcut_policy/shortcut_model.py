@@ -67,7 +67,9 @@ class ShortcutModel:
         traj.append(z.clone())
 
         for i in range(num_inference_steps):
-            t = torch.ones((z.shape[0],), device=self.device) * (i / num_inference_steps)
+            t = torch.ones((z.shape[0],), device=self.device) * (
+                i / num_inference_steps
+            )
             pred = self.model(z, t, distance=dt, **model_kwargs)
             z = z + pred * dt
             traj.append(z.clone())

@@ -174,7 +174,9 @@ class TrainDiffusionUnetImageWorkspace:
                     alpha=0.5,
                     color=f"C{self.num_shortcut_steps.index(s)}",
                 )
-            self.mse_ax.scatter(steps, mse, s=20, color=f"C{self.num_shortcut_steps.index(s)}")
+            self.mse_ax.scatter(
+                steps, mse, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
+            )
             mse_legend_handles.append(
                 mlines.Line2D(
                     [],
@@ -523,13 +525,10 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name=pathlib.Path(__file__).stem,
+    config_name="train_unet_image_shortcut_policy",
 )
-def main(cfg=None):
+def main(cfg):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
-    if cfg is None:
-        with initialize(config_path="../config"):
-            cfg = compose(config_name="train_unet_image_shortcut_policy")
     workspace.run()
 
 
