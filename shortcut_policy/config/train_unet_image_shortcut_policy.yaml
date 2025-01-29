@@ -2,7 +2,7 @@ defaults:
   - _self_
   - tasks: pusht_image
 
-name: train_diffusion_unet_image
+name: train_diffusion_unet_image_${num_inference_steps}
 _target_: shortcut_policy.unet_shortcut.train_unet_image_shortcut_policy.TrainDiffusionUnetImageWorkspace
 
 task_name: ${tasks.name}
