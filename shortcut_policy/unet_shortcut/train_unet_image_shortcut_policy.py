@@ -30,8 +30,9 @@ import matplotlib.lines as mlines
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
 from omegaconf import OmegaConf
-from typing import Optional
+from typing import Optional, Dict, List
 from torch.utils.data import DataLoader
+from collections import defaultdict
 
 from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
     UnetImageShortcutPolicy,
@@ -39,7 +40,12 @@ from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
 
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
-from shared.utils.pytorch_util import dict_apply, optimizer_to, copy_to_cpu
+from shared.utils.pytorch_util import (
+    dict_apply,
+    optimizer_to,
+    copy_to_cpu,
+    temporary_attribute,
+)
 from shared.models.unet.ema_model import EMAModel
 from shared.models.common.lr_scheduler import get_scheduler
 
@@ -61,8 +67,10 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
+        # Create the model
         self.model: UnetImageShortcutPolicy = hydra.utils.instantiate(cfg.policy)
 
+        # Optionally create an EMA copy
         self.ema_model: Optional[UnetImageShortcutPolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
@@ -76,29 +84,44 @@ class TrainDiffusionUnetImageWorkspace:
         self.global_step = 0
         self.epoch = 0
 
-        # For plotting w/matplotlib
+        # Shortcut steps we want to test
         self.num_shortcut_steps = [1, 2, 4, 8, 16, 32, 64, 128]
-        self.training_steps = []
+
+        # For logging speed vs. MSE
+        self.training_steps: List[int] = []
         self.time_data = {f"Time_{s}": [] for s in self.num_shortcut_steps}
         self.mse_data = {f"MSE_{s}": [] for s in self.num_shortcut_steps}
         self.plot_log_interval = 1
 
+        # Output dir
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Output directory set to: {self.output_dir}")
 
-        # Speed test plot
+        # Speed & MSE figure handles
         self.speed_fig, self.speed_ax = plt.subplots(figsize=(10, 6))
         self.speed_ax.set_xlabel("Global Step")
         self.speed_ax.set_ylabel("Time Elapsed (s)")
         self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
         self.speed_path = os.path.join(self.output_dir, "shortcut_speed_test.png")
 
-        # MSE plot
         self.mse_fig, self.mse_ax = plt.subplots(figsize=(10, 6))
         self.mse_ax.set_xlabel("Global Step")
         self.mse_ax.set_ylabel("Mean Squared Error")
         self.mse_ax.set_title("MSE across step sizes")
         self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_num_steps.png")
+
+        # ---------------------------
+        # Coverage Tracking
+        # ---------------------------
+        # We track coverage for seeds = 0 ("train") and 100000 ("test").
+        # coverage_history[s]["train"] = coverage array over time
+        # coverage_history[s]["test"] = coverage array over time
+        self.coverage_history: Dict[int, Dict[str, List[float]]] = {}
+        for s in self.num_shortcut_steps:
+            self.coverage_history[s] = defaultdict(list)
+
+        # coverage_global_steps = list of x-values
+        self.coverage_global_steps: List[int] = []
 
     @property
     def output_dir(self):
@@ -108,14 +131,13 @@ class TrainDiffusionUnetImageWorkspace:
         return output_dir
 
     def update_plot(self):
-
-        # Speed test plot
+        """Update & log the speed and MSE plots for the current self.global_step."""
+        # ---- SPEED PLOT ----
         self.speed_ax.clear()
         self.speed_ax.set_xlabel("Global Step")
         self.speed_ax.set_ylabel("Time Elapsed (s)")
         self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
         speed_legend_handles = []
-
         for s in self.num_shortcut_steps:
             steps = self.training_steps
             times = self.time_data[f"Time_{s}"]
@@ -137,45 +159,47 @@ class TrainDiffusionUnetImageWorkspace:
                     color=f"C{self.num_shortcut_steps.index(s)}",
                     marker="o",
                     linestyle="",
-                    label=f"Steps: {s}",
+                    label=f"Steps={s}",
                 )
             )
         self.speed_ax.legend(
             handles=speed_legend_handles, fontsize=8, loc="upper right"
         )
-        self.speed_ax.set_yticks(
-            np.linspace(
-                min(min(self.time_data.values())),
-                max(max(self.time_data.values())),
-                num=20,
-            )
-        )
+
+        # Ticks
+        all_times = []
+        for sublist in self.time_data.values():
+            all_times.extend(sublist)
+        if len(all_times) > 1:
+            min_t, max_t = min(all_times), max(all_times)
+            if min_t < max_t:
+                self.speed_ax.set_yticks(np.linspace(min_t, max_t, num=5))
+
         self.speed_fig.tight_layout()
         self.speed_fig.savefig(self.speed_path)
         wandb.log(
             {"shortcut_speed_test": wandb.Image(self.speed_path)}, step=self.global_step
         )
 
-        # MSE plot
+        # ---- MSE PLOT ----
         self.mse_ax.clear()
         self.mse_ax.set_xlabel("Global Step")
         self.mse_ax.set_ylabel("Mean Squared Error")
-        self.mse_ax.set_title("Shortcut Policy MSE across step sizes")
+        self.mse_ax.set_title("MSE across step sizes")
         mse_legend_handles = []
-
         for s in self.num_shortcut_steps:
             steps = self.training_steps
-            mse = self.mse_data[f"MSE_{s}"]
+            mse_vals = self.mse_data[f"MSE_{s}"]
             if len(steps) > 1:
                 self.mse_ax.plot(
                     steps,
-                    mse,
+                    mse_vals,
                     linestyle="-",
                     alpha=0.5,
                     color=f"C{self.num_shortcut_steps.index(s)}",
                 )
             self.mse_ax.scatter(
-                steps, mse, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
+                steps, mse_vals, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
             )
             mse_legend_handles.append(
                 mlines.Line2D(
@@ -184,23 +208,111 @@ class TrainDiffusionUnetImageWorkspace:
                     color=f"C{self.num_shortcut_steps.index(s)}",
                     marker="o",
                     linestyle="",
-                    label=f"Steps: {s}",
+                    label=f"Steps={s}",
                 )
             )
         self.mse_ax.legend(handles=mse_legend_handles, fontsize=8, loc="upper right")
-        self.mse_ax.set_yticks(
-            np.linspace(
-                min(min(self.mse_data.values())),
-                max(max(self.mse_data.values())),
-                num=20,
-            )
-        )
+
+        all_mse_vals = []
+        for sublist in self.mse_data.values():
+            all_mse_vals.extend(sublist)
+        if len(all_mse_vals) > 1:
+            min_m, max_m = min(all_mse_vals), max(all_mse_vals)
+            if min_m < max_m:
+                self.mse_ax.set_yticks(np.linspace(min_m, max_m, num=5))
+
         self.mse_fig.tight_layout()
         self.mse_fig.savefig(self.mse_path)
         wandb.log(
             {"shortcut_mse_per_num_steps": wandb.Image(self.mse_path)},
             step=self.global_step,
         )
+
+    def update_coverage_plots(self):
+        """
+        1) Create 8 separate subplots (one for each s), each can show up to 2 lines: train/test.
+        2) Create one combined "train" plot: x-axis=global_step, lines are s=1..128 coverage_history[s]["train"].
+        3) Create one combined "test" plot: x-axis=global_step, lines are s=1..128 coverage_history[s]["test"].
+        4) Log all 8+2=10 plots as a list under "shortcut_coverage_plots".
+        """
+        coverage_plots = []
+
+        # ----- 1) PER-SUBPLOT PLOTS -----
+        for s in self.num_shortcut_steps:
+            fig, ax = plt.subplots(figsize=(5, 4))
+
+            # coverage_history[s]["train"]
+            train_data = self.coverage_history[s]["train"]
+            if len(train_data) == len(self.coverage_global_steps):
+                ax.plot(
+                    self.coverage_global_steps,
+                    train_data,
+                    marker="o",
+                    linestyle="-",
+                    label="train",
+                )
+
+            # coverage_history[s]["test"]
+            test_data = self.coverage_history[s]["test"]
+            if len(test_data) == len(self.coverage_global_steps):
+                ax.plot(
+                    self.coverage_global_steps,
+                    test_data,
+                    marker="o",
+                    linestyle="-",
+                    label="test",
+                )
+
+            ax.set_title(f"Coverage vs. Global Step (steps={s})")
+            ax.set_xlabel("Global Step")
+            ax.set_ylabel("Coverage")
+            ax.legend(fontsize=7)
+            fig.tight_layout()
+            coverage_plots.append(wandb.Image(fig))
+            plt.close(fig)
+
+        # ----- 2) COMBINED TRAIN PLOT -----
+        fig_train, ax_train = plt.subplots(figsize=(6, 4))
+        for s in self.num_shortcut_steps:
+            train_data = self.coverage_history[s]["train"]
+            if len(train_data) == len(self.coverage_global_steps):
+                ax_train.plot(
+                    self.coverage_global_steps,
+                    train_data,
+                    marker="o",
+                    linestyle="-",
+                    label=f"s={s}",
+                )
+        ax_train.set_title("Train Coverage vs. Global Step (all s)")
+        ax_train.set_xlabel("Global Step")
+        ax_train.set_ylabel("Coverage")
+        ax_train.legend(fontsize=7)
+        fig_train.tight_layout()
+        coverage_plots.append(wandb.Image(fig_train))
+        plt.close(fig_train)
+
+        # ----- 3) COMBINED TEST PLOT -----
+        fig_test, ax_test = plt.subplots(figsize=(6, 4))
+        for s in self.num_shortcut_steps:
+            test_data = self.coverage_history[s]["test"]
+            if len(test_data) == len(self.coverage_global_steps):
+                ax_test.plot(
+                    self.coverage_global_steps,
+                    test_data,
+                    marker="o",
+                    linestyle="-",
+                    label=f"s={s}",
+                )
+        ax_test.set_title("Test Coverage vs. Global Step (all s)")
+        ax_test.set_xlabel("Global Step")
+        ax_test.set_ylabel("Coverage")
+        ax_test.legend(fontsize=7)
+        fig_test.tight_layout()
+        coverage_plots.append(wandb.Image(fig_test))
+        plt.close(fig_test)
+
+        # ----- 4) LOG ALL PLOTS -----
+        wandb.log({"shortcut_coverage_plots": coverage_plots}, step=self.global_step)
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -221,11 +333,12 @@ class TrainDiffusionUnetImageWorkspace:
         val_dataset = dataset.get_validation_dataset()
         val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
+        # Set normalizer
         self.model.set_normalizer(normalizer)
         if self.ema_model is not None:
             self.ema_model.set_normalizer(normalizer)
 
-        # LR scheduler
+        # LR Scheduler
         lr_scheduler = get_scheduler(
             cfg.training.lr_scheduler,
             optimizer=self.optimizer,
@@ -245,7 +358,7 @@ class TrainDiffusionUnetImageWorkspace:
             cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
-        # Weights & Biases logging
+        # Init W&B
         wandb_run = wandb.init(
             dir=str(self.output_dir),
             config=OmegaConf.to_container(cfg, resolve=True),
@@ -253,22 +366,22 @@ class TrainDiffusionUnetImageWorkspace:
         )
         wandb.config.update({"output_dir": self.output_dir})
 
-        # TopK checkpoint manager
+        # TopK manager
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"), **cfg.checkpoint.topk
         )
 
-        # Device setup
+        # Device
         device = torch.device(cfg.training.device)
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
 
-        # Save batch for sampling
+        # Possibly store the first batch for sampling
         train_sampling_batch = None
 
-        # Debug mode adjustments
+        # Debug adjustments
         if cfg.training.debug:
             cfg.training.num_epochs = 2
             cfg.training.max_train_steps = 3
@@ -281,8 +394,11 @@ class TrainDiffusionUnetImageWorkspace:
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
+
                 step_log = {}
-                # ========= Train for this epoch ==========
+                # ---------------------------
+                # 1) TRAIN
+                # ---------------------------
                 if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
@@ -295,7 +411,6 @@ class TrainDiffusionUnetImageWorkspace:
                     mininterval=cfg.training.tqdm_interval_sec,
                 ) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
-                        # Device transfer
                         batch = dict_apply(
                             batch, lambda x: x.to(device, non_blocking=True)
                         )
@@ -306,22 +421,20 @@ class TrainDiffusionUnetImageWorkspace:
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        # Optim step
                         if (
                             self.global_step % cfg.training.gradient_accumulate_every
-                            == 0
-                        ):
+                        ) == 0:
                             self.optimizer.step()
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
 
-                        # Update EMA
                         if cfg.training.use_ema:
                             ema.step(self.model)
 
                         raw_loss_cpu = raw_loss.item()
                         tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                         train_losses.append(raw_loss_cpu)
+
                         step_log = {
                             "train_loss": raw_loss_cpu,
                             "global_step": self.global_step,
@@ -331,26 +444,25 @@ class TrainDiffusionUnetImageWorkspace:
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
                         if not is_last_batch:
-                            # Log intermediate steps
                             wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
 
-                        if cfg.training.max_train_steps is not None and batch_idx >= (
-                            cfg.training.max_train_steps - 1
+                        if (cfg.training.max_train_steps is not None) and (
+                            batch_idx >= (cfg.training.max_train_steps - 1)
                         ):
                             break
 
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
-                # ========= Evaluation for this epoch ==========
-                policy = self.model
-                if cfg.training.use_ema:
-                    policy = self.ema_model
+                # ---------------------------
+                # 2) EVAL
+                # ---------------------------
+                policy = self.model if not cfg.training.use_ema else self.ema_model
                 policy.eval()
 
-                # Rollout
+                # Possibly rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
                     runner_log = env_runner.run(policy)
                     step_log.update(runner_log)
@@ -380,7 +492,9 @@ class TrainDiffusionUnetImageWorkspace:
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
                             step_log["val_loss"] = val_loss
 
-                # ========= Sampling =========
+                # ---------------------------
+                # 3) SAMPLING & SHORTCUT TEST
+                # ---------------------------
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
                         batch = dict_apply(
@@ -390,13 +504,13 @@ class TrainDiffusionUnetImageWorkspace:
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
 
-                        # Normal sampling with "predict_action"
+                        # Normal sampling
                         result = policy.predict_action_shortcut(obs_dict)
                         pred_action = result["action_pred"]
-                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                        step_log["train_action_mse_error"] = mse.item()
+                        mse_val = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        step_log["train_action_mse_error"] = mse_val.item()
 
-                        # ======== Speed Test ========
+                        # Speed & MSE
                         for s in self.num_shortcut_steps:
                             t0 = time.time()
                             result_n = policy.predict_action_shortcut(obs_dict, s)
@@ -405,24 +519,39 @@ class TrainDiffusionUnetImageWorkspace:
                             pred_n = result_n["action_pred"]
                             mse_n = torch.nn.functional.mse_loss(pred_n, gt_action)
 
-                            time_elapsed = t1 - t0
-                            self.time_data[f"Time_{s}"].append(time_elapsed)
+                            self.time_data[f"Time_{s}"].append(t1 - t0)
                             self.mse_data[f"MSE_{s}"].append(mse_n.item())
 
-                        self.training_steps.append(self.global_step)
+                        # Coverage only for seeds=0 => "train" and 100000 => "test"
+                        for s in self.num_shortcut_steps:
+                            with temporary_attribute(policy, "num_inference_steps", s):
+                                runner_log = env_runner.run(policy)
 
-                        if self.global_step % self.plot_log_interval == 0:
+                            for k, v in runner_log.items():
+                                if "sim_max_coverage_" in k:
+                                    # e.g. "train/sim_max_coverage_0" or "test/sim_max_coverage_100000"
+                                    seed_str = k.rsplit("_", 1)[-1]
+                                    if seed_str in ["0", "100000"]:
+                                        coverage_val = float(v)
+                                        seed_label = (
+                                            "train" if seed_str == "0" else "test"
+                                        )
+                                        self.coverage_history[s][seed_label].append(
+                                            coverage_val
+                                        )
+
+                        self.coverage_global_steps.append(self.global_step)
+                        self.update_coverage_plots()  # 8 subplots + 2 combined
+
+                        self.training_steps.append(self.global_step)
+                        if (self.global_step % self.plot_log_interval) == 0:
                             self.update_plot()
 
-                        # ======== Cleanup ========
-                        del batch
-                        del obs_dict
-                        del gt_action
-                        del result
-                        del pred_action
-                        del mse
+                        del batch, obs_dict, gt_action, result, pred_action, mse_val
 
-                # Checkpointing
+                # ---------------------------
+                # 4) CHECKPOINT
+                # ---------------------------
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
                     if cfg.checkpoint.save_last_ckpt:
                         self.save_checkpoint()
@@ -434,9 +563,13 @@ class TrainDiffusionUnetImageWorkspace:
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
 
+                # Return to train mode
                 policy.train()
+
+                # Log final step metrics
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
+
                 self.global_step += 1
                 self.epoch += 1
 
