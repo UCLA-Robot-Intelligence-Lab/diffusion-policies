@@ -11,6 +11,8 @@ task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
+output_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
@@ -96,6 +98,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
+  measure_coverage: true
   device: ${device}
   seed: 42
   debug: False

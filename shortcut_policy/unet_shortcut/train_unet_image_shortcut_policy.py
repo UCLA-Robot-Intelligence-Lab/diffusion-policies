@@ -110,19 +110,6 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_ax.set_title("MSE across step sizes")
         self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_num_steps.png")
 
-        # ---------------------------
-        # Coverage Tracking
-        # ---------------------------
-        # We track coverage for seeds = 0 ("train") and 100000 ("test").
-        # coverage_history[s]["train"] = coverage array over time
-        # coverage_history[s]["test"] = coverage array over time
-        self.coverage_history: Dict[int, Dict[str, List[float]]] = {}
-        for s in self.num_shortcut_steps:
-            self.coverage_history[s] = defaultdict(list)
-
-        # coverage_global_steps = list of x-values
-        self.coverage_global_steps: List[int] = []
-
     @property
     def output_dir(self):
         output_dir = self._output_dir
@@ -132,6 +119,7 @@ class TrainDiffusionUnetImageWorkspace:
 
     def update_plot(self):
         """Update & log the speed and MSE plots for the current self.global_step."""
+        custom_plots = []
         # ---- SPEED PLOT ----
         self.speed_ax.clear()
         self.speed_ax.set_xlabel("Global Step")
@@ -162,11 +150,8 @@ class TrainDiffusionUnetImageWorkspace:
                     label=f"Steps={s}",
                 )
             )
-        self.speed_ax.legend(
-            handles=speed_legend_handles, fontsize=8, loc="upper right"
-        )
+        self.speed_ax.legend(handles=speed_legend_handles, fontsize=8, loc="upper right")
 
-        # Ticks
         all_times = []
         for sublist in self.time_data.values():
             all_times.extend(sublist)
@@ -176,10 +161,7 @@ class TrainDiffusionUnetImageWorkspace:
                 self.speed_ax.set_yticks(np.linspace(min_t, max_t, num=5))
 
         self.speed_fig.tight_layout()
-        self.speed_fig.savefig(self.speed_path)
-        wandb.log(
-            {"shortcut_speed_test": wandb.Image(self.speed_path)}, step=self.global_step
-        )
+        custom_plots.append(wandb.Image(self.speed_fig))
 
         # ---- MSE PLOT ----
         self.mse_ax.clear()
@@ -222,97 +204,10 @@ class TrainDiffusionUnetImageWorkspace:
                 self.mse_ax.set_yticks(np.linspace(min_m, max_m, num=5))
 
         self.mse_fig.tight_layout()
-        self.mse_fig.savefig(self.mse_path)
-        wandb.log(
-            {"shortcut_mse_per_num_steps": wandb.Image(self.mse_path)},
-            step=self.global_step,
-        )
+        custom_plots.append(wandb.Image(self.mse_fig))
 
-    def update_coverage_plots(self):
-        """
-        1) Create 8 separate subplots (one for each s), each can show up to 2 lines: train/test.
-        2) Create one combined "train" plot: x-axis=global_step, lines are s=1..128 coverage_history[s]["train"].
-        3) Create one combined "test" plot: x-axis=global_step, lines are s=1..128 coverage_history[s]["test"].
-        4) Log all 8+2=10 plots as a list under "shortcut_coverage_plots".
-        """
-        coverage_plots = []
-
-        # ----- 1) PER-SUBPLOT PLOTS -----
-        for s in self.num_shortcut_steps:
-            fig, ax = plt.subplots(figsize=(5, 4))
-
-            # coverage_history[s]["train"]
-            train_data = self.coverage_history[s]["train"]
-            if len(train_data) == len(self.coverage_global_steps):
-                ax.plot(
-                    self.coverage_global_steps,
-                    train_data,
-                    marker="o",
-                    linestyle="-",
-                    label="train",
-                )
-
-            # coverage_history[s]["test"]
-            test_data = self.coverage_history[s]["test"]
-            if len(test_data) == len(self.coverage_global_steps):
-                ax.plot(
-                    self.coverage_global_steps,
-                    test_data,
-                    marker="o",
-                    linestyle="-",
-                    label="test",
-                )
-
-            ax.set_title(f"Coverage vs. Global Step (steps={s})")
-            ax.set_xlabel("Global Step")
-            ax.set_ylabel("Coverage")
-            ax.legend(fontsize=7)
-            fig.tight_layout()
-            coverage_plots.append(wandb.Image(fig))
-            plt.close(fig)
-
-        # ----- 2) COMBINED TRAIN PLOT -----
-        fig_train, ax_train = plt.subplots(figsize=(6, 4))
-        for s in self.num_shortcut_steps:
-            train_data = self.coverage_history[s]["train"]
-            if len(train_data) == len(self.coverage_global_steps):
-                ax_train.plot(
-                    self.coverage_global_steps,
-                    train_data,
-                    marker="o",
-                    linestyle="-",
-                    label=f"s={s}",
-                )
-        ax_train.set_title("Train Coverage vs. Global Step (all s)")
-        ax_train.set_xlabel("Global Step")
-        ax_train.set_ylabel("Coverage")
-        ax_train.legend(fontsize=7)
-        fig_train.tight_layout()
-        coverage_plots.append(wandb.Image(fig_train))
-        plt.close(fig_train)
-
-        # ----- 3) COMBINED TEST PLOT -----
-        fig_test, ax_test = plt.subplots(figsize=(6, 4))
-        for s in self.num_shortcut_steps:
-            test_data = self.coverage_history[s]["test"]
-            if len(test_data) == len(self.coverage_global_steps):
-                ax_test.plot(
-                    self.coverage_global_steps,
-                    test_data,
-                    marker="o",
-                    linestyle="-",
-                    label=f"s={s}",
-                )
-        ax_test.set_title("Test Coverage vs. Global Step (all s)")
-        ax_test.set_xlabel("Global Step")
-        ax_test.set_ylabel("Coverage")
-        ax_test.legend(fontsize=7)
-        fig_test.tight_layout()
-        coverage_plots.append(wandb.Image(fig_test))
-        plt.close(fig_test)
-
-        # ----- 4) LOG ALL PLOTS -----
-        wandb.log({"shortcut_coverage_plots": coverage_plots}, step=self.global_step)
+        # Log both in one go
+        wandb.log({"custom_plots": custom_plots}, step=self.global_step)
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -378,7 +273,6 @@ class TrainDiffusionUnetImageWorkspace:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
 
-        # Possibly store the first batch for sampling
         train_sampling_batch = None
 
         # Debug adjustments
@@ -428,7 +322,7 @@ class TrainDiffusionUnetImageWorkspace:
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
 
-                        if cfg.training.use_ema:
+                        if cfg.training.use_ema and ema is not None:
                             ema.step(self.model)
 
                         raw_loss_cpu = raw_loss.item()
@@ -522,30 +416,27 @@ class TrainDiffusionUnetImageWorkspace:
                             self.time_data[f"Time_{s}"].append(t1 - t0)
                             self.mse_data[f"MSE_{s}"].append(mse_n.item())
 
-                        # Coverage only for seeds=0 => "train" and 100000 => "test"
-                        for s in self.num_shortcut_steps:
-                            with temporary_attribute(policy, "num_inference_steps", s):
-                                runner_log = env_runner.run(policy)
-
-                            for k, v in runner_log.items():
-                                if "sim_max_coverage_" in k:
-                                    # e.g. "train/sim_max_coverage_0" or "test/sim_max_coverage_100000"
-                                    seed_str = k.rsplit("_", 1)[-1]
-                                    if seed_str in ["0", "100000"]:
-                                        coverage_val = float(v)
-                                        seed_label = (
-                                            "train" if seed_str == "0" else "test"
-                                        )
-                                        self.coverage_history[s][seed_label].append(
-                                            coverage_val
-                                        )
-
-                        self.coverage_global_steps.append(self.global_step)
-                        self.update_coverage_plots()  # 8 subplots + 2 combined
-
                         self.training_steps.append(self.global_step)
                         if (self.global_step % self.plot_log_interval) == 0:
                             self.update_plot()
+
+                        # ---------------------------
+                        # Coverage Logging (config)
+                        # ---------------------------
+                        if cfg.training.get("measure_coverage", False):
+                            coverage_log_dict = {}
+                            for s in self.num_shortcut_steps:
+                                with temporary_attribute(policy, "num_inference_steps", s):
+                                    runner_log_s = env_runner.run(policy)
+
+                                for k, v in runner_log_s.items():
+                                    if "sim_max_coverage_" in k:
+                                        prefix = k.split("/")[0]  # "train" or "test"
+                                        coverage_name = k.split("/", 1)[1]
+                                        seed_str = coverage_name.rsplit("_", 1)[-1]
+                                        coverage_log_dict[f"{s}_coverage/{prefix}/seed_{seed_str}"] = float(v)
+
+                            wandb.log(coverage_log_dict, step=self.global_step)
 
                         del batch, obs_dict, gt_action, result, pred_action, mse_val
 
@@ -658,7 +549,7 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name="train_unet_image_shortcut_policy",
+    config_name="train_unet_image_shortcut_policy", # Change config here!
 )
 def main(cfg):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
