@@ -93,6 +93,9 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_data = {f"MSE_{s}": [] for s in self.num_shortcut_steps}
         self.plot_log_interval = 1
 
+        # For coverage logging (moving average)
+        self.coverage_data = {s: [] for s in self.num_shortcut_steps}
+
         # Output dir
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Output directory set to: {self.output_dir}")
@@ -210,6 +213,34 @@ class TrainDiffusionUnetImageWorkspace:
 
         # Log both in one go
         wandb.log({"custom_plots": custom_plots}, step=self.global_step)
+
+    def update_coverage_plot(self):
+        coverage_fig, coverage_ax = plt.subplots(figsize=(8, 4))
+        coverage_ax.set_title("Coverage vs Num Shortcut Steps")
+        coverage_ax.set_xlabel("Step Size")
+        coverage_ax.set_ylabel("Coverage (Avg)")
+
+        coverage_avgs = []
+        for s in self.num_shortcut_steps:
+            data_list = self.coverage_data[s]
+            coverage_avg = (
+                sum(data_list) / len(data_list) if len(data_list) > 0 else 0.0
+            )
+            coverage_avgs.append(coverage_avg)
+
+        coverage_ax.bar(
+            [str(s) for s in self.num_shortcut_steps],
+            coverage_avgs,
+            color="C2",
+            alpha=0.7,
+        )
+
+        max_cov = max(coverage_avgs) if coverage_avgs else 0
+        coverage_ax.set_ylim([0, max(max_cov, 1e-6) * 1.1])
+
+        coverage_fig.tight_layout()
+        wandb.log({"coverage_plot": wandb.Image(coverage_fig)}, step=self.global_step)
+        plt.close(coverage_fig)
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -363,6 +394,24 @@ class TrainDiffusionUnetImageWorkspace:
                     runner_log = env_runner.run(policy)
                     step_log.update(runner_log)
 
+                # Moving average of coverage vs. num shortcut steps
+                if (
+                    cfg.training.get("measure_coverage", False)
+                    and (self.epoch % cfg.training.rollout_every) == 0
+                ):
+                    coverage_log_dict = {}
+                    for s in self.num_shortcut_steps:
+                        with temporary_attribute(policy, "num_inference_steps", s):
+                            runner_log_s = env_runner.run(policy)
+                        for k, v in runner_log_s.items():
+                            if "sim_max_coverage_" in k:
+                                coverage_val = float(v)
+                                coverage_log_dict[f"{s}_coverage/{k}"] = coverage_val
+                                self.coverage_data[s].append(coverage_val)
+
+                    self.update_coverage_plot()
+                    wandb.log(coverage_log_dict, step=self.global_step)
+
                 # Validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
@@ -421,28 +470,6 @@ class TrainDiffusionUnetImageWorkspace:
                         self.training_steps.append(self.global_step)
                         if (self.global_step % self.plot_log_interval) == 0:
                             self.update_plot()
-
-                        # ---------------------------
-                        # Coverage Logging (config)
-                        # ---------------------------
-                        if cfg.training.get("measure_coverage", False):
-                            coverage_log_dict = {}
-                            for s in self.num_shortcut_steps:
-                                with temporary_attribute(
-                                    policy, "num_inference_steps", s
-                                ):
-                                    runner_log_s = env_runner.run(policy)
-
-                                for k, v in runner_log_s.items():
-                                    if "sim_max_coverage_" in k:
-                                        prefix = k.split("/")[0]  # "train" or "test"
-                                        coverage_name = k.split("/", 1)[1]
-                                        seed_str = coverage_name.rsplit("_", 1)[-1]
-                                        coverage_log_dict[
-                                            f"{s}_coverage/{prefix}/seed_{seed_str}"
-                                        ] = float(v)
-
-                            wandb.log(coverage_log_dict, step=self.global_step)
 
                         del batch, obs_dict, gt_action, result, pred_action, mse_val
 
