@@ -150,7 +150,9 @@ class TrainDiffusionUnetImageWorkspace:
                     label=f"Steps={s}",
                 )
             )
-        self.speed_ax.legend(handles=speed_legend_handles, fontsize=8, loc="upper right")
+        self.speed_ax.legend(
+            handles=speed_legend_handles, fontsize=8, loc="upper right"
+        )
 
         all_times = []
         for sublist in self.time_data.values():
@@ -426,7 +428,9 @@ class TrainDiffusionUnetImageWorkspace:
                         if cfg.training.get("measure_coverage", False):
                             coverage_log_dict = {}
                             for s in self.num_shortcut_steps:
-                                with temporary_attribute(policy, "num_inference_steps", s):
+                                with temporary_attribute(
+                                    policy, "num_inference_steps", s
+                                ):
                                     runner_log_s = env_runner.run(policy)
 
                                 for k, v in runner_log_s.items():
@@ -434,7 +438,9 @@ class TrainDiffusionUnetImageWorkspace:
                                         prefix = k.split("/")[0]  # "train" or "test"
                                         coverage_name = k.split("/", 1)[1]
                                         seed_str = coverage_name.rsplit("_", 1)[-1]
-                                        coverage_log_dict[f"{s}_coverage/{prefix}/seed_{seed_str}"] = float(v)
+                                        coverage_log_dict[
+                                            f"{s}_coverage/{prefix}/seed_{seed_str}"
+                                        ] = float(v)
 
                             wandb.log(coverage_log_dict, step=self.global_step)
 
@@ -549,7 +555,7 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name="train_unet_image_shortcut_policy", # Change config here!
+    config_name="train_unet_image_shortcut_policy",
 )
 def main(cfg):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
