@@ -93,8 +93,12 @@ class TrainDiffusionUnetImageWorkspace:
         self.mse_data = {f"MSE_{s}": [] for s in self.num_shortcut_steps}
         self.plot_log_interval = 1
 
-        # For coverage logging (moving average)
-        self.coverage_data = {s: [] for s in self.num_shortcut_steps}
+        # For coverage logging (track train and test separately)
+        # We'll store all coverage values to later compute both average & max
+        self.coverage_data = {
+            "train": {s: [] for s in self.num_shortcut_steps},
+            "test": {s: [] for s in self.num_shortcut_steps},
+        }
 
         # Output dir
         os.makedirs(self.output_dir, exist_ok=True)
@@ -215,28 +219,87 @@ class TrainDiffusionUnetImageWorkspace:
         wandb.log({"custom_plots": custom_plots}, step=self.global_step)
 
     def update_coverage_plot(self):
-        coverage_fig, coverage_ax = plt.subplots(figsize=(8, 4))
-        coverage_ax.set_title("Coverage vs Num Shortcut Steps")
-        coverage_ax.set_xlabel("Step Size")
-        coverage_ax.set_ylabel("Coverage (Avg)")
+        coverage_fig, coverage_ax = plt.subplots(figsize=(10, 5))
+        coverage_ax.set_title("Coverage vs Num Inference Steps")
+        coverage_ax.set_xlabel("Inference Steps")
+        coverage_ax.set_ylabel("Coverage")
 
-        coverage_avgs = []
+        coverage_avgs_train = []
+        coverage_avgs_test = []
+        coverage_max_train = []
+        coverage_max_test = []
+
         for s in self.num_shortcut_steps:
-            data_list = self.coverage_data[s]
-            coverage_avg = (
-                sum(data_list) / len(data_list) if len(data_list) > 0 else 0.0
-            )
-            coverage_avgs.append(coverage_avg)
+            train_values = self.coverage_data["train"][s]
+            test_values = self.coverage_data["test"][s]
 
+            if len(train_values) > 0:
+                coverage_avgs_train.append(np.mean(train_values))
+                coverage_max_train.append(np.max(train_values))
+            else:
+                coverage_avgs_train.append(0.0)
+                coverage_max_train.append(0.0)
+
+            if len(test_values) > 0:
+                coverage_avgs_test.append(np.mean(test_values))
+                coverage_max_test.append(np.max(test_values))
+            else:
+                coverage_avgs_test.append(0.0)
+                coverage_max_test.append(0.0)
+
+        x_positions = np.arange(len(self.num_shortcut_steps))
+        bar_width = 0.2
+
+        # 1) Train Avg
         coverage_ax.bar(
-            [str(s) for s in self.num_shortcut_steps],
-            coverage_avgs,
+            x_positions - 1.5 * bar_width,
+            coverage_avgs_train,
+            bar_width,
+            label="Train Avg",
+            color="C0",
+            alpha=0.7,
+        )
+        # 2) Test Avg
+        coverage_ax.bar(
+            x_positions - 0.5 * bar_width,
+            coverage_avgs_test,
+            bar_width,
+            label="Test Avg",
+            color="C1",
+            alpha=0.7,
+        )
+        # 3) Train Max
+        coverage_ax.bar(
+            x_positions + 0.5 * bar_width,
+            coverage_max_train,
+            bar_width,
+            label="Train Max",
             color="C2",
             alpha=0.7,
         )
+        # 4) Test Max
+        coverage_ax.bar(
+            x_positions + 1.5 * bar_width,
+            coverage_max_test,
+            bar_width,
+            label="Test Max",
+            color="C3",
+            alpha=0.7,
+        )
 
-        max_cov = max(coverage_avgs) if coverage_avgs else 0
-        coverage_ax.set_ylim([0, max(max_cov, 1e-6) * 1.1])
+        coverage_ax.set_xticks(x_positions)
+        coverage_ax.set_xticklabels([str(s) for s in self.num_shortcut_steps])
+
+        all_values = (
+            coverage_avgs_train
+            + coverage_avgs_test
+            + coverage_max_train
+            + coverage_max_test
+        )
+        if len(all_values) > 0:
+            max_cov = max(all_values)
+            coverage_ax.set_ylim([0, max(max_cov, 1e-6) * 1.1])
+        coverage_ax.legend()
 
         coverage_fig.tight_layout()
         wandb.log({"coverage_plot": wandb.Image(coverage_fig)}, step=self.global_step)
@@ -384,7 +447,7 @@ class TrainDiffusionUnetImageWorkspace:
                 step_log["train_loss"] = train_loss
 
                 # ---------------------------
-                # 2) EVAL
+                # 2) EVAL (Rollout & Coverage)
                 # ---------------------------
                 policy = self.model if not cfg.training.use_ema else self.ema_model
                 policy.eval()
@@ -394,7 +457,7 @@ class TrainDiffusionUnetImageWorkspace:
                     runner_log = env_runner.run(policy)
                     step_log.update(runner_log)
 
-                # Moving average of coverage vs. num shortcut steps
+                # Coverage logging, track separately for train vs test
                 if (
                     cfg.training.get("measure_coverage", False)
                     and (self.epoch % cfg.training.rollout_every) == 0
@@ -402,14 +465,27 @@ class TrainDiffusionUnetImageWorkspace:
                     coverage_log_dict = {}
                     for s in self.num_shortcut_steps:
                         with temporary_attribute(policy, "num_inference_steps", s):
+                            # env_runner might produce multiple coverage keys,
+                            # e.g. "train/sim_max_coverage_X" or "test/sim_max_coverage_X"
                             runner_log_s = env_runner.run(policy)
                         for k, v in runner_log_s.items():
                             if "sim_max_coverage_" in k:
                                 coverage_val = float(v)
-                                coverage_log_dict[f"{s}_coverage/{k}"] = coverage_val
-                                self.coverage_data[s].append(coverage_val)
+                                # Decide which side (train/test) to store
+                                if k.startswith("train"):
+                                    self.coverage_data["train"][s].append(coverage_val)
+                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
+                                        coverage_val
+                                    )
+                                elif k.startswith("test"):
+                                    self.coverage_data["test"][s].append(coverage_val)
+                                    coverage_log_dict[f"test_{s}_coverage/{k}"] = (
+                                        coverage_val
+                                    )
 
+                    # Update the grouped bar chart for coverage
                     self.update_coverage_plot()
+                    # Also log raw coverage values
                     wandb.log(coverage_log_dict, step=self.global_step)
 
                 # Validation
@@ -518,12 +594,14 @@ class TrainDiffusionUnetImageWorkspace:
         payload = {"cfg": self.cfg, "state_dicts": {}, "pickles": {}}
 
         for key, value in self.__dict__.items():
+            # Save state_dicts for modules like model, optimizer, etc.
             if hasattr(value, "state_dict") and hasattr(value, "load_state_dict"):
                 if key not in exclude_keys:
                     if use_thread:
                         payload["state_dicts"][key] = copy_to_cpu(value.state_dict())
                     else:
                         payload["state_dicts"][key] = value.state_dict()
+            # Save certain attributes as pickles
             elif key in include_keys:
                 payload["pickles"][key] = dill.dumps(value)
 
