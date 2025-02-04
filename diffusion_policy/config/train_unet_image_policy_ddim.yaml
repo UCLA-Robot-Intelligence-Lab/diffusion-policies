@@ -12,6 +12,8 @@ exp_name: "default"
 
 device: "cuda:7"
 
+measure_coverage: true
+
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
@@ -97,6 +99,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
+  measure_coverage: ${measure_coverage}
   device: ${device}
   seed: 42
   debug: False

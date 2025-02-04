@@ -1,12 +1,12 @@
 defaults:
   - _self_
-  - task: lift_image
+  - tasks: transport_image
 
 name: train_robomimic_image
-_target_: diffusion_policy.workspace.train_robomimic_image_workspace.TrainRobomimicImageWorkspace
+_target_: diffusion_policy.unet.train_robomimic_image_policy.TrainRobomimicImageWorkspace
 
-task_name: ${task.name}
-shape_meta: ${task.shape_meta}
+task_name: ${tasks.name}
+shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
 horizon: &horizon 10
@@ -18,13 +18,13 @@ past_action_visible: False
 keypoint_visible_rate: 1.0
 
 policy:
-  _target_: diffusion_policy.policy.robomimic_image_policy.RobomimicImagePolicy
+  _target_: diffusion_policy.unet.robomimic_image_policy.RobomimicImagePolicy
   shape_meta: ${shape_meta}
   algo_name: bc_rnn
   obs_type: image
   # oc.select resolver: key, default
-  task_name: ${oc.select:task.task_name,lift}
-  dataset_type: ${oc.select:task.dataset_type,ph}
+  task_name: ${oc.select:tasks.task_name,lift}
+  dataset_type: ${oc.select:tasks.dataset_type,ph}
   crop_shape: [76,76]
 
 dataloader:

@@ -21,6 +21,11 @@ import wandb
 import tqdm
 import numpy as np
 import time
+import matplotlib
+
+matplotlib.use("Agg")  # Non-GUI backend
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
@@ -33,7 +38,12 @@ from diffusion_policy.unet.unet_image_policy import (
 )
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
-from shared.utils.pytorch_util import dict_apply, optimizer_to, copy_to_cpu
+from shared.utils.pytorch_util import (
+    dict_apply,
+    optimizer_to,
+    copy_to_cpu,
+    temporary_attribute,
+)
 from shared.models.unet.ema_model import EMAModel
 from shared.models.common.lr_scheduler import get_scheduler
 
@@ -71,12 +81,106 @@ class TrainDiffusionUnetImageWorkspace:
         self.global_step = 0
         self.epoch = 0
 
+        # Inference step testing
+        self.num_inference_steps_ls = [10, 16, 25, 50, 100]
+        self.coverage_data = {
+            "train": {s: [] for s in self.num_inference_steps_ls},
+            "test": {s: [] for s in self.num_inference_steps_ls},
+        }
+
     @property
     def output_dir(self):
         output_dir = self._output_dir
         if output_dir is None:
             output_dir = HydraConfig.get().runtime.output_dir
         return output_dir
+
+    def update_coverage_plot(self):
+        coverage_fig, coverage_ax = plt.subplots(figsize=(10, 5))
+        coverage_ax.set_title("Coverage vs Num Inference Steps")
+        coverage_ax.set_xlabel("Inference Steps")
+        coverage_ax.set_ylabel("Coverage")
+
+        coverage_avgs_train = []
+        coverage_avgs_test = []
+        coverage_max_train = []
+        coverage_max_test = []
+
+        for s in self.num_inference_steps_ls:
+            train_values = self.coverage_data["train"][s]
+            test_values = self.coverage_data["test"][s]
+
+            if len(train_values) > 0:
+                coverage_avgs_train.append(np.mean(train_values))
+                coverage_max_train.append(np.max(train_values))
+            else:
+                coverage_avgs_train.append(0.0)
+                coverage_max_train.append(0.0)
+
+            if len(test_values) > 0:
+                coverage_avgs_test.append(np.mean(test_values))
+                coverage_max_test.append(np.max(test_values))
+            else:
+                coverage_avgs_test.append(0.0)
+                coverage_max_test.append(0.0)
+
+        x_positions = np.arange(len(self.num_inference_steps_ls))
+        bar_width = 0.2
+
+        # 1) Train Avg
+        coverage_ax.bar(
+            x_positions - 1.5 * bar_width,
+            coverage_avgs_train,
+            bar_width,
+            label="Train Avg",
+            color="C0",
+            alpha=0.7,
+        )
+        # 2) Test Avg
+        coverage_ax.bar(
+            x_positions - 0.5 * bar_width,
+            coverage_avgs_test,
+            bar_width,
+            label="Test Avg",
+            color="C1",
+            alpha=0.7,
+        )
+        # 3) Train Max
+        coverage_ax.bar(
+            x_positions + 0.5 * bar_width,
+            coverage_max_train,
+            bar_width,
+            label="Train Max",
+            color="C2",
+            alpha=0.7,
+        )
+        # 4) Test Max
+        coverage_ax.bar(
+            x_positions + 1.5 * bar_width,
+            coverage_max_test,
+            bar_width,
+            label="Test Max",
+            color="C3",
+            alpha=0.7,
+        )
+
+        coverage_ax.set_xticks(x_positions)
+        coverage_ax.set_xticklabels([str(s) for s in self.num_inference_steps_ls])
+
+        all_values = (
+            coverage_avgs_train
+            + coverage_avgs_test
+            + coverage_max_train
+            + coverage_max_test
+        )
+        if len(all_values) > 0:
+            max_cov = max(all_values)
+            coverage_ax.set_ylim([0, max(max_cov, 1e-6) * 1.1])
+        coverage_ax.legend()
+
+        coverage_fig.tight_layout()
+        wandb.log({"coverage_plot": wandb.Image(coverage_fig)}, step=self.global_step)
+        plt.close(coverage_fig)
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -247,6 +351,31 @@ class TrainDiffusionUnetImageWorkspace:
                     runner_log = env_runner.run(policy)
                     # Log all
                     step_log.update(runner_log)
+
+                # Coverage logging, track separately for train vs test
+                if cfg.training.get("measure_coverage", False) and (
+                    self.epoch % cfg.training.rollout_every == 0
+                ):
+                    coverage_log_dict = {}
+                    for s in self.num_inference_steps_ls:
+                        with temporary_attribute(policy, "num_inference_steps", s):
+                            runner_log_s = env_runner.run(policy)
+                        for k, v in runner_log_s.items():
+                            if "sim_max_coverage_" in k:
+                                coverage_val = float(v)
+                                if k.startswith("train"):
+                                    self.coverage_data["train"][s].append(coverage_val)
+                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
+                                        coverage_val
+                                    )
+                                elif k.startswith("test"):
+                                    self.coverage_data["test"][s].append(coverage_val)
+                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
+                                        coverage_val
+                                    )
+
+                    self.update_coverage_plot()
+                    wandb.log(coverage_log_dict, step=self.global_step)
 
                 # Run validation
                 if (self.epoch % cfg.training.val_every) == 0:
