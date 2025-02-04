@@ -23,7 +23,7 @@ policy:
   algo_name: bc_rnn
   obs_type: image
   # oc.select resolver: key, default
-  task_name: ${oc.select:tasks.task_name,lift}
+  task_name: ${oc.select:tasks.task_name,transport}
   dataset_type: ${oc.select:tasks.dataset_type,ph}
   crop_shape: [76,76]
 

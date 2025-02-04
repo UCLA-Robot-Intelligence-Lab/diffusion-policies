@@ -71,7 +71,7 @@ class TrainRobomimicImageWorkspace:
                 self.load_checkpoint(path=lastest_ckpt_path)
 
         # configure dataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        dataset = hydra.utils.instantiate(cfg.tasks.dataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
 
@@ -83,7 +83,7 @@ class TrainRobomimicImageWorkspace:
 
         # configure env
         env_runner = hydra.utils.instantiate(
-            cfg.task.env_runner, output_dir=self.output_dir
+            cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
         # configure logging

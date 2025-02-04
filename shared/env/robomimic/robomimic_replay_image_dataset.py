@@ -14,7 +14,7 @@ from filelock import FileLock
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 from typing import Dict, List
-from torch.utils.dataset import Dataset
+from torch.utils.data import Dataset
 from omegaconf import OmegaConf
 
 from shared.utils.pytorch_util import dict_apply
@@ -23,8 +23,6 @@ from shared.models.common.normalizer import (
     SingleFieldLinearNormalizer,
 )
 from shared.models.common.rotation_transformer import RotationTransformer
-
-from diffusion_policy.model.common.rotation_transformer import RotationTransformer
 from shared.utils.imagecodecs_numcodecs import register_codecs, Jpeg2k
 from shared.env.robomimic.replay_buffer import ReplayBuffer
 from shared.env.robomimic.sampler import SequenceSampler, get_val_mask
