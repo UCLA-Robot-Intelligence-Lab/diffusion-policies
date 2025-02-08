@@ -46,7 +46,7 @@ class RobomimicReplayImageDataset(Dataset):
         horizon=1,
         pad_before=0,
         pad_after=0,
-        n_obs_steps=None,
+        num_obs_steps=None,
         abs_action=False,
         rotation_rep="rotation_6d",  # ignored when abs_action=False
         use_legacy_normalizer=False,
@@ -112,10 +112,10 @@ class RobomimicReplayImageDataset(Dataset):
         #     replay_buffer[key].compressor.numthreads=1
 
         key_first_k = dict()
-        if n_obs_steps is not None:
+        if num_obs_steps is not None:
             # only take first k obs from images
             for key in rgb_keys + lowdim_keys:
-                key_first_k[key] = n_obs_steps
+                key_first_k[key] = num_obs_steps
 
         val_mask = get_val_mask(
             n_episodes=replay_buffer.n_episodes, val_ratio=val_ratio, seed=seed
@@ -136,7 +136,7 @@ class RobomimicReplayImageDataset(Dataset):
         self.rgb_keys = rgb_keys
         self.lowdim_keys = lowdim_keys
         self.abs_action = abs_action
-        self.n_obs_steps = n_obs_steps
+        self.num_obs_steps = num_obs_steps
         self.train_mask = train_mask
         self.horizon = horizon
         self.pad_before = pad_before
@@ -206,11 +206,11 @@ class RobomimicReplayImageDataset(Dataset):
         threadpool_limits(1)
         data = self.sampler.sample_sequence(idx)
 
-        # to save RAM, only return first n_obs_steps of OBS
+        # to save RAM, only return first num_obs_steps of OBS
         # since the rest will be discarded anyway.
-        # when self.n_obs_steps is None
+        # when self.num_obs_steps is None
         # this slice does nothing (takes all)
-        T_slice = slice(self.n_obs_steps)
+        T_slice = slice(self.num_obs_steps)
 
         obs_dict = dict()
         for key in self.rgb_keys:

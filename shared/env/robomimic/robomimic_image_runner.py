@@ -21,7 +21,7 @@ from shared.utils.gym.video_recording_wrapper import (
     VideoRecordingWrapper,
 )
 from shared.env.robomimic.robomimic_image_wrapper import RobomimicImageWrapper
-from shared.model.common.rotation_transformer import RotationTransformer
+from shared.models.common.rotation_transformer import RotationTransformer
 from shared.utils.pytorch_util import dict_apply
 
 
@@ -57,8 +57,8 @@ class RobomimicImageRunner:
         n_test_vis=6,
         test_start_seed=10000,
         max_steps=400,
-        n_obs_steps=2,
-        n_action_steps=8,
+        num_obs_steps=2,
+        num_action_steps=8,
         render_obs_key="agentview_image",
         fps=10,
         crf=22,
@@ -67,11 +67,11 @@ class RobomimicImageRunner:
         tqdm_interval_sec=5.0,
         n_envs=None,
     ):
-        seslf.output_dir = output_dir
+        self.output_dir = output_dir
         if n_envs is None:
             n_envs = n_train + n_test
 
-        # assert n_obs_steps <= n_action_steps
+        # assert num_obs_steps <= num_action_steps
         dataset_path = os.path.expanduser(dataset_path)
         robosuite_fps = 20
         steps_per_render = max(robosuite_fps // fps, 1)
@@ -111,8 +111,8 @@ class RobomimicImageRunner:
                     file_path=None,
                     steps_per_render=steps_per_render,
                 ),
-                n_obs_steps=n_obs_steps,
-                n_action_steps=n_action_steps,
+                num_obs_steps=num_obs_steps,
+                num_action_steps=num_action_steps,
                 max_episode_steps=max_steps,
             )
 
@@ -143,8 +143,8 @@ class RobomimicImageRunner:
                     file_path=None,
                     steps_per_render=steps_per_render,
                 ),
-                n_obs_steps=n_obs_steps,
-                n_action_steps=n_action_steps,
+                num_obs_steps=num_obs_steps,
+                num_action_steps=num_action_steps,
                 max_episode_steps=max_steps,
             )
 
@@ -221,8 +221,8 @@ class RobomimicImageRunner:
         self.env_init_fn_dills = env_init_fn_dills
         self.fps = fps
         self.crf = crf
-        self.n_obs_steps = n_obs_steps
-        self.n_action_steps = n_action_steps
+        self.num_obs_steps = num_obs_steps
+        self.num_action_steps = num_action_steps
         self.past_action = past_action
         self.max_steps = max_steps
         self.rotation_transformer = rotation_transformer
@@ -279,7 +279,7 @@ class RobomimicImageRunner:
                 if self.past_action and (past_action is not None):
                     # TODO: not tested
                     np_obs_dict["past_action"] = past_action[
-                        :, -(self.n_obs_steps - 1) :
+                        :, -(self.num_obs_steps - 1) :
                     ].astype(np.float32)
 
                 # device transfer

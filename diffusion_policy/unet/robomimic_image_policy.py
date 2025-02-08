@@ -7,11 +7,10 @@ from shared.utils.pytorch_util import dict_apply
 from shared.utils.robomimic_config_util import get_robomimic_config
 
 from robomimic.algo import algo_factory
-from robomimic.algo import algo_factory
 from robomimic.algo.algo import PolicyAlgo
 
 
-class RobomimicImagePolicy:
+class RobomimicImagePolicy(torch.nn.Module):
     def __init__(
         self,
         shape_meta: dict,
@@ -21,7 +20,7 @@ class RobomimicImagePolicy:
         dataset_type="ph",
         crop_shape=(76, 76),
     ):
-        super().__init__()
+        super(RobomimicImagePolicy, self).__init__()
 
         # parse shape_meta
         action_shape = shape_meta["action"]["shape"]
@@ -34,13 +33,13 @@ class RobomimicImagePolicy:
             shape = attr["shape"]
             obs_key_shapes[key] = list(shape)
 
-            type = attr.get("type", "low_dim")
-            if type == "rgb":
+            obs_type_key = attr.get("type", "low_dim")
+            if obs_type_key == "rgb":
                 obs_config["rgb"].append(key)
-            elif type == "low_dim":
+            elif obs_type_key == "low_dim":
                 obs_config["low_dim"].append(key)
             else:
-                raise RuntimeError(f"Unsupported obs type: {type}")
+                raise RuntimeError(f"Unsupported obs type: {obs_type_key}")
 
         # get raw robomimic config
         config = get_robomimic_config(
@@ -84,23 +83,19 @@ class RobomimicImagePolicy:
         self.config = config
 
     def to(self, *args, **kwargs):
-        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-            *args, **kwargs
-        )
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
         if device is not None:
             self.model.device = device
-        super().to(*args, **kwargs)
+        return super().to(*args, **kwargs)
 
     # =========== inference =============
-    def predict_action(
-        self, obs_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         nobs_dict = self.normalizer(obs_dict)
         robomimic_obs_dict = dict_apply(nobs_dict, lambda x: x[:, 0, ...])
         naction = self.model.get_action(robomimic_obs_dict)
         action = self.normalizer["action"].unnormalize(naction)
-        # (B, Da)
-        result = {"action": action[:, None, :]}  # (B, 1, Da)
+        # (B, Da) → (B, 1, Da)
+        result = {"action": action[:, None, :]}
         return result
 
     def reset(self):
@@ -115,10 +110,7 @@ class RobomimicImagePolicy:
         nactions = self.normalizer["action"].normalize(batch["action"])
         robomimic_batch = {"obs": nobs, "actions": nactions}
         input_batch = self.model.process_batch_for_training(robomimic_batch)
-        info = self.model.train_on_batch(
-            batch=input_batch, epoch=epoch, validate=validate
-        )
-        # keys: losses, predictions
+        info = self.model.train_on_batch(batch=input_batch, epoch=epoch, validate=validate)
         return info
 
     def on_epoch_end(self, epoch):

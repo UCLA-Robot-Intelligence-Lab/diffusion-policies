@@ -10,8 +10,8 @@ shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
 horizon: &horizon 10
-n_obs_steps: 1
-n_action_steps: 1
+num_obs_steps: 1
+num_action_steps: 1
 n_latency_steps: 0
 dataset_obs_steps: *horizon
 past_action_visible: False

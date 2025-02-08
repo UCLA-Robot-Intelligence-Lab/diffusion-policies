@@ -48,8 +48,8 @@ env_runner:
   n_test_vis: 4
   test_start_seed: 100000
   max_steps: 700
-  n_obs_steps: ${n_obs_steps}
-  n_action_steps: ${n_action_steps}
+  num_obs_steps: ${num_obs_steps}
+  num_action_steps: ${num_action_steps}
   render_obs_key: 'shouldercamera0_image'
   fps: 10
   crf: 22
@@ -64,9 +64,9 @@ dataset:
   shape_meta: *shape_meta
   dataset_path: *dataset_path
   horizon: ${horizon}
-  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
-  pad_after: ${eval:'${n_action_steps}-1'}
-  n_obs_steps: ${dataset_obs_steps}
+  pad_before: ${eval:'${num_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${num_action_steps}-1'}
+  num_obs_steps: ${dataset_obs_steps}
   abs_action: *abs_action
   rotation_rep: 'rotation_6d'
   use_legacy_normalizer: False
