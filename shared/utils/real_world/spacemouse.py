@@ -14,7 +14,7 @@ import time
 class Spacemouse(Thread):
     def __init__(
         self,
-        max_value=500,
+        max_value=300,
         deadzone=(0, 0, 0, 0, 0, 0),
         dtype=np.float32,
         shm_manager=None,
