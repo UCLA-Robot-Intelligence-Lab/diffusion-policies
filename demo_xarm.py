@@ -4,86 +4,80 @@ import cv2
 import sys
 import numpy as np
 
-from shared.utils.real_world.precise_util import precise_wait
-from shared.utils.real_world.spacemouse import Spacemouse
 from shared.utils.real_world.keystroke_counter import KeystrokeCounter, Key
 
 from ril_env.xarm_env import XArmEnv, XArmConfig
+from ril_env.controller import SpaceMouse, SpaceMouseConfig
 
 @click.command()
-@click.option(
-    "--robot_ip",
-    "-ri",
-    default="192.168.1.223",
-    help="xArm's IP address e.g. 192.168.1.223",
-)
-@click.option(
-    "--frequency", "-f", default=10, type=float, help="Control frequency in Hz."
-)
 @click.option(
     "--command_latency",
     "-cl",
     default=0.01,
     type=float,
-    help="Latency between receiving SpaceMouse command to executing on Robot in Sec.",
+    help="(Optional) artificial latency before each robot command.",
 )
 @click.option(
     "--max_speed",
     "-ms",
     default=100,
     type=float,
-    help="Max speed of the robot in mm/s.",
+    help="Max speed of the robot in mm/s (if you want to clamp dpos).",
 )
-def main(robot_ip, frequency, command_latency, max_speed):
-    max_speed = max_speed * frequency
-    dt = 1 / frequency
-
+def main(robot_ip, command_latency, max_speed):
     xarm_config = XArmConfig()
-    xarm_config.ip = robot_ip  # override IP if necessary
-    # Other configuration parameters can be set here if needed.
+    xarm_config.ip = robot_ip
 
     xarm_env = XArmEnv(xarm_config)
-
-    # Optionally, do an initial reset if needed
     xarm_env._arm_reset()
+
+    loop_period = xarm_env.control_loop_period
+
+    spacemouse_cfg = SpaceMouseConfig(
+        pos_sensitivity=2.0,
+        rot_sensitivity=2.0,
+        verbose=False,
+        vendor_id=9583,
+        product_id=50741,
+    )
 
     cv2.setNumThreads(1)
 
-    with Spacemouse() as sm, KeystrokeCounter() as key_counter:
+    last_print_time = time.monotonic()
+    loops_since_print = 0
+
+    with SpaceMouse(spacemouse_cfg) as sm, KeystrokeCounter() as key_counter:
         print("Ready!")
-        t_start = time.monotonic()
-        iter_idx = 0
 
         while True:
-            # Calculate timing for control loop
-            t_cycle_end = t_start + (iter_idx + 1) * dt
-            t_sample = t_cycle_end - command_latency
+            loop_start = time.monotonic()
 
-            precise_wait(t_sample)
+            if command_latency > 0:
+                time.sleep(command_latency)
 
-            # Get input from SpaceMouse
-            sm_state = sm.get_motion_state_transformed()
-            # Compute displacement and rotation changes based on SpaceMouse input.
-            dpos = sm_state[:3] * (max_speed / frequency)
-            drot = sm_state[3:] * (max_speed / frequency)
+            state = sm.get_controller_state()
+            dpos = state["dpos"] * xarm_config.position_gain
+            drot = state["raw_drotation"] * xarm_config.orientation_gain
 
-            # For 3 DoF movement, ignore rotation if desired
-            drot[:] = 0
-
-            # Check for reset command (e.g., SpaceMouse button press)
-            if sm.is_button_pressed(0):
-                # Use the environment's reset method to go back to home
+            if state["reset"] == 1:
                 xarm_env._arm_reset()
-                # Optionally, reinitialize your target state if needed.
                 continue
 
-            # Here, we assume grasp value of 0.0 (open) for simplicity.
-            grasp = 0.0
-
+            grasp = state["grasp"]
             xarm_env.step(dpos, drot, grasp)
 
-            precise_wait(t_cycle_end)
-            iter_idx += 1
+            elapsed = time.monotonic() - loop_start
+            sleep_time = loop_period - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+            loops_since_print += 1
+            now = time.monotonic()
+            if now - last_print_time >= 1.0:
+                freq_measured = loops_since_print / (now - last_print_time)
+                print(f"[demo_xarm] Current loop frequency: {freq_measured:.2f} Hz")
+                loops_since_print = 0
+                last_print_time = now
 
 if __name__ == "__main__":
     main()
