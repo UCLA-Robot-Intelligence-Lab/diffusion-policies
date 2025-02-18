@@ -1,12 +1,23 @@
+"""
+This file is largely taken from the original Diffusion Policy repository, modified for
+the xArm7. It can probably be used with any xArm robot.
+
+
+"""
+
+
 import time
 import click
 import cv2
 import sys
 import numpy as np
+import scipy.spatial.transform as st
+
+from multiprocessing.managers import SharedMemoryManager
 
 from shared.utils.real_world.precise_util import precise_wait
 from shared.utils.real_world.spacemouse import Spacemouse
-from shared.utils.real_world.keystroke_counter import KeystrokeCounter, Key
+from shared.utils.real_world.keystroke_counter import KeystrokeCounter, Key, KeyCode
 
 from ril_env.xarm_env import XArmEnv, XArmConfig
 
@@ -50,30 +61,33 @@ def main(robot_ip, frequency, command_latency, max_speed):
     cv2.setNumThreads(1)
 
     with Spacemouse(deadzone=0.4) as sm, KeystrokeCounter() as key_counter:
+        try:
+            while True:
+                loop_start = time.monotonic()
 
-        while True:
-            loop_start = time.monotonic()
 
+                if command_latency > 0:
+                    time.sleep(command_latency)
 
-            if command_latency > 0:
-                time.sleep(command_latency)
+                sm_state = sm.get_motion_state_transformed()
+                dpos = sm_state[:3]
+                drot = sm_state[3:]
+                grasp = sm.grasp
 
-            sm_state = sm.get_motion_state_transformed()
-            dpos = sm_state[:3]
-            drot = sm_state[3:]
+                if sm.is_button_pressed(1):
+                    xarm_env._arm_reset()
+                    continue
 
-            if sm.is_button_pressed(0):
-                xarm_env._arm_reset()
-                continue
+                xarm_env.step(dpos, drot, grasp)
+                elapsed = time.monotonic() - loop_start
+                sleep_time = loop_period - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+        except KeyboardInterrupt:
+            print("\nStopped.")
 
-            # Here, we assume grasp value of 0.0 (open) for simplicity.
-            grasp = 0.0
+    xarm_env._arm_reset()
 
-            xarm_env.step(dpos, drot, grasp)
-            elapsed = time.monotonic() - loop_start
-            sleep_time = loop_period - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
 
 
 if __name__ == "__main__":
