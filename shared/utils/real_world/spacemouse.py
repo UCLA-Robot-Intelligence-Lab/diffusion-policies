@@ -37,20 +37,31 @@ class Spacemouse(Thread):
         self.dtype = dtype
         self.deadzone = deadzone
 
-        # Initialize motion state
         self.motion_event = SpnavMotionEvent([0, 0, 0], [0, 0, 0], 0)
         # Dictionary to keep track of button states (True if pressed)
         self.button_state = defaultdict(lambda: False)
         # Grasp state: 0.0 for open, 1.0 for closed
         self.grasp = 0.0
-        # Transformation matrix to convert the native coordinate system to a right-handed one.
-        self.tx_zup_spnav = np.array([[0, 0, -1],
-                                      [1, 0, 0],
-                                      [0, 1, 0]], dtype=dtype)
+
+        # Translation transform:
+        #   Mapping native translation: [translation_x, translation_y, translation_z]
+        #   where native: right: x, up: y, front: z,
+        #   to desired robot frame: [forward, right, up]
+        self.tx_translation = np.array([
+            [0, 0, 1],  # native +z becomes robot +x (forward)
+            [-1, 0, 0],  # native +x becomes robot +y (right)
+            [0, 1, 0]   # native +y becomes robot +z (up)
+        ], dtype=dtype)
+
+        # Rotation transform:
+        self.tx_rotation = np.array([
+            [0, 0, -1],  # roll
+            [1, 0,  0],  # pitch
+            [0, 1,  0]   # yaw
+        ], dtype=dtype)
 
     def get_motion_state(self):
         me = self.motion_event
-        # Concatenate translation and rotation, normalize by max_value.
         state = np.array(me.translation + me.rotation, dtype=self.dtype) / self.max_value
         # Zero out values within the deadzone.
         is_dead = (-self.deadzone < state) & (state < self.deadzone)
@@ -59,22 +70,16 @@ class Spacemouse(Thread):
 
     def get_motion_state_transformed(self):
         """
-        Return the motion state in a right-handed coordinate system.
+        Return the motion state in a right-handed coordinate system using separate
+        transformations for translation and rotation.
 
-        Coordinate mapping:
-            Native SpaceMouse:
-                front: z
-                right: x
-                up: y
-            Transformed:
-                x: back
-                y: right
-                z: up
+        Translation (first three elements) is mapped by tx_translation.
+        Rotation (last three elements) is mapped by tx_rotation.
         """
         state = self.get_motion_state()
         tf_state = np.zeros_like(state)
-        tf_state[:3] = self.tx_zup_spnav @ state[:3]
-        tf_state[3:] = self.tx_zup_spnav @ state[3:]
+        tf_state[:3] = self.tx_translation @ state[:3]
+        tf_state[3:] = self.tx_rotation @ state[3:]
         return tf_state
 
     def is_button_pressed(self, button_id):
@@ -102,16 +107,11 @@ class Spacemouse(Thread):
                 if isinstance(event, SpnavMotionEvent):
                     self.motion_event = event
                 elif isinstance(event, SpnavButtonEvent):
-                    # Button event processing:
-                    # Assume left button (button 0) toggles the gripper (grasp state)
                     if event.bnum == 0 and event.press:
-                        # Toggle grasp state: if open (0.0), then close (1.0); if closed, then open.
                         self.grasp = 1.0 if self.grasp == 0.0 else 0.0
                         print(f"Gripper toggled to: {'closed' if self.grasp == 1.0 else 'opened'}")
-                    # Update the button state regardless of button number.
                     self.button_state[event.bnum] = event.press
                 else:
-                    # In case no event is returned, sleep briefly.
                     time.sleep(1 / 200)
         finally:
             spnav_close()
@@ -120,7 +120,6 @@ class Spacemouse(Thread):
 def test():
     with Spacemouse(deadzone=0.3) as sm:
         for i in range(2000):
-            # Print the transformed motion state and current grasp state.
             print("Motion state:", sm.get_motion_state_transformed())
             print("Grasp state:", sm.grasp)
             time.sleep(1 / 100)

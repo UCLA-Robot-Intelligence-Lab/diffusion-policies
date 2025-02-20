@@ -49,7 +49,7 @@ def main(robot_ip, frequency, command_latency, max_speed):
     max_speed = max_speed * frequency
     dt = 1 / frequency
 
-    xarm_config = XArmConfig()
+    xarm_config = XArmConfig(position_gain=2.0, orientation_gain=2.0)
     xarm_config.ip = robot_ip
 
     xarm_env = XArmEnv(xarm_config)
@@ -70,8 +70,8 @@ def main(robot_ip, frequency, command_latency, max_speed):
                     time.sleep(command_latency)
 
                 sm_state = sm.get_motion_state_transformed()
-                dpos = sm_state[:3]
-                drot = sm_state[3:]
+                dpos = sm_state[:3] * xarm_config.position_gain
+                drot = sm_state[3:] * xarm_config.orientation_gain
                 grasp = sm.grasp
 
                 if sm.is_button_pressed(1):
