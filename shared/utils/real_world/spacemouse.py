@@ -47,22 +47,25 @@ class Spacemouse(Thread):
         #   Mapping native translation: [translation_x, translation_y, translation_z]
         #   where native: right: x, up: y, front: z,
         #   to desired robot frame: [forward, right, up]
-        self.tx_translation = np.array([
-            [0, 0, 1],  # native +z becomes robot +x (forward)
-            [-1, 0, 0],  # native +x becomes robot +y (right)
-            [0, 1, 0]   # native +y becomes robot +z (up)
-        ], dtype=dtype)
+        self.tx_translation = np.array(
+            [
+                [0, 0, 1],  # native +z becomes robot +x (forward)
+                [-1, 0, 0],  # native +x becomes robot +y (right)
+                [0, 1, 0],  # native +y becomes robot +z (up)
+            ],
+            dtype=dtype,
+        )
 
         # Rotation transform:
-        self.tx_rotation = np.array([
-            [0, 0, -1],  # roll
-            [1, 0,  0],  # pitch
-            [0, 1,  0]   # yaw
-        ], dtype=dtype)
+        self.tx_rotation = np.array(
+            [[0, 0, -1], [1, 0, 0], [0, 1, 0]], dtype=dtype  # roll  # pitch  # yaw
+        )
 
     def get_motion_state(self):
         me = self.motion_event
-        state = np.array(me.translation + me.rotation, dtype=self.dtype) / self.max_value
+        state = (
+            np.array(me.translation + me.rotation, dtype=self.dtype) / self.max_value
+        )
         # Zero out values within the deadzone.
         is_dead = (-self.deadzone < state) & (state < self.deadzone)
         state[is_dead] = 0
@@ -109,7 +112,9 @@ class Spacemouse(Thread):
                 elif isinstance(event, SpnavButtonEvent):
                     if event.bnum == 0 and event.press:
                         self.grasp = 1.0 if self.grasp == 0.0 else 0.0
-                        print(f"Gripper toggled to: {'closed' if self.grasp == 1.0 else 'opened'}")
+                        print(
+                            f"Gripper toggled to: {'closed' if self.grasp == 1.0 else 'opened'}"
+                        )
                     self.button_state[event.bnum] = event.press
                 else:
                     time.sleep(1 / 200)
