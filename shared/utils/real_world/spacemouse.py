@@ -58,7 +58,12 @@ class Spacemouse(Thread):
 
         # Rotation transform:
         self.tx_rotation = np.array(
-            [[0, 0, -1], [1, 0, 0], [0, 1, 0]], dtype=dtype  # roll  # pitch  # yaw
+            [
+                [0, 0, -1],  # native +z rotation aligns with robot -x (roll)
+                [1, 0, 0],  # native +x rotation aligns with robot +y (pitch)
+                [0, 1, 0],  # native +y rotation aligns with robot +z (yaw)
+            ],
+            dtype=dtype,
         )
 
     def get_motion_state(self):
