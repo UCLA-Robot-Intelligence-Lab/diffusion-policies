@@ -23,9 +23,9 @@ import scipy.spatial.transform as st
 from multiprocessing.managers import SharedMemoryManager
 
 # RealEnv missing!
-from shared.utils.real_world.precise_util import precise_wait
-from shared.utils.real_world.spacemouse import Spacemouse
-from shared.utils.real_world.keystroke_counter import KeystrokeCounter, Key, KeyCode
+from shared.real_world.precise_util import precise_wait
+from shared.real_world.spacemouse import Spacemouse
+from shared.real_world.keystroke_counter import KeystrokeCounter, Key, KeyCode
 
 # This assumes you have ril_env installed in the same level.
 # i.e., running ls in the directory above should list something like

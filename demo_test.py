@@ -1,93 +1,78 @@
-"""
-Demo script to test the RTDEInterpolationController (adapted for xArm) on the robot.
-
-Usage example:
-    python demo_rtde_controller.py --robot_ip 192.168.1.223 --frequency 20 --duration 2.0
-
-This script:
-  - Creates a shared memory manager.
-  - Instantiates and starts the RTDEInterpolationController process.
-  - Sends a test servoL command (i.e., a pose command) to the controller.
-  - Waits for the command to execute and then stops the controller.
-
-Note: This demo tests the RTDEInterpolationController (the “RTDEController stuff”) on the real robot.
-Make sure you have set up all safety parameters and that your test pose is safe.
-"""
-
 import time
-import click
 import numpy as np
+import cv2
 from multiprocessing.managers import SharedMemoryManager
 
-# Import the adapted RTDEInterpolationController.
-# (This file is the modified version of the controller that now uses the xArm API.)
-from shared.utils.real_world.rtde_interpolation_controller import (
+from shared.real_world.spacemouse import Spacemouse
+from shared.real_world.xarm_interpolation_controller import (
     xArmInterpolationController,
-)
+)  # your modified file
 
 
-@click.command()
-@click.option(
-    "--robot_ip", "-ri", default="192.168.1.223", help="IP address of the xArm robot."
-)
-@click.option(
-    "--frequency", "-f", default=20.0, type=float, help="Control loop frequency in Hz."
-)
-@click.option(
-    "--duration",
-    "-d",
-    default=2.0,
-    type=float,
-    help="Duration for the servoL command (in sec).",
-)
-def main(robot_ip, frequency, duration):
-    dt = 1.0 / frequency
-
-    # Create a shared memory manager.
+def main():
+    # 1. Set up the interpolation controller
+    robot_ip = "192.168.1.223"
+    frequency = 20
     shm_manager = SharedMemoryManager()
     shm_manager.start()
 
-    # Create an instance of the RTDEInterpolationController.
-    # BEFORE: In the UR version this would create RTDEControlInterface and RTDEReceiveInterface.
-    # NOW: We pass robot_ip and parameters to the controller that now uses the xArmAPI.
     controller = xArmInterpolationController(
         shm_manager=shm_manager,
         robot_ip=robot_ip,
         frequency=frequency,
-        lookahead_time=0.1,
-        gain=300,
-        max_pos_speed=0.25,  # m/s
-        max_rot_speed=0.16,  # rad/s
-        launch_timeout=5,
-        tcp_offset_pose=[0, 0, 0, 0, 0, 0],  # Example offset; adjust if needed.
-        joints_init=[0, 0, 0, 0, 0, 0],  # Example initial joint pose.
         verbose=True,
     )
 
-    # Start the controller process.
+    # 2. Start the controller process
     controller.start(wait=True)
     print("Controller process started and ready.")
+    time.sleep(2)
 
-    # Send a servoL command with a test pose.
-    # The pose is given in SI units: first three values in meters, last three in radians.
-    test_pose = [0.4, 0.0, 0.3, 0.0, 0.0, 0.0]
-    # BEFORE: The UR version would send this to rtde_c.servoL.
-    # NOW: Our controller will use its run() loop (which calls arm.set_servo_cartesian) to move the arm.
-    print(f"Sending servoL command with pose: {test_pose} for duration {duration} sec.")
-    controller.servoL(test_pose, duration=duration)
-
-    # Let the controller run for the duration plus a short margin.
-    time.sleep(duration + 1)
-
-    # Optionally, retrieve and print the latest state from the ring buffer.
+    # 3. Initialize a “current target pose”.
+    #    For example, read from the robot or just use a known default/home.
     state = controller.get_state()
-    print("Latest state from controller:", state)
+    current_pose = state["ActualTCPPose"]
+    current_pose = np.array(current_pose, dtype=float)  # shape (6,)
 
-    # Stop the controller.
+    position_gain = 15.0
+    orientation_gain = 15.0
+
+    # 4. Open the SpaceMouse
+    with Spacemouse(deadzone=0.2) as sm:
+        try:
+            print("Move the SpaceMouse to move the robot EEF.")
+            while True:
+                loop_start = time.monotonic()
+
+                # 4a. Read SpaceMouse
+                sm_state = sm.get_motion_state_transformed()  # shape (6,)
+                # Typically: sm_state[:3] = dpos, sm_state[3:] = drot
+                dpos = sm_state[:3] * position_gain
+                drot = sm_state[3:] * orientation_gain
+
+                # 4b. Convert drot from axis-angle or some representation into rpy deltas
+                #     but commonly in SpaceMouse, drot is a small incremental euler-ish.
+                #     You might just add it in place if it’s small enough.
+                current_pose[:3] += dpos  # x,y,z
+                current_pose[
+                    3:
+                ] += drot  # roll, pitch, yaw in degrees if that’s your representation
+
+                # 4c. Send a short servoL command to the interpolation controller
+                #     small duration to keep streaming
+                controller.servoL(current_pose, duration=0.1)
+
+                # 4d. Regulate frequency
+                elapsed = time.monotonic() - loop_start
+                sleep_time = (1.0 / frequency) - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+        except KeyboardInterrupt:
+            print("\nSpaceMouse control stopped.")
+
+    # 5. Stop the interpolation controller
     controller.stop(wait=True)
     print("Controller process stopped.")
-
-    # Shutdown the shared memory manager.
     shm_manager.shutdown()
 
 
