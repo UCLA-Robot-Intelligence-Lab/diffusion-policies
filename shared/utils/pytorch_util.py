@@ -4,6 +4,17 @@ import torch.nn as nn
 import copy
 
 from typing import Dict, Callable, List
+from contextlib import contextmanager
+
+
+@contextmanager
+def temporary_attribute(obj, attr, value):
+    original_value = getattr(obj, attr)
+    setattr(obj, attr, value)
+    try:
+        yield
+    finally:
+        setattr(obj, attr, original_value)
 
 
 def copy_to_cpu(x):

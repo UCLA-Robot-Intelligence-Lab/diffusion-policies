@@ -3,7 +3,7 @@ defaults:
   - tasks: pusht_image
 
 name: train_diffusion_unet_image_${num_inference_steps}
-_target_: diffusion_policy.unet.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
+_target_: shortcut_policy.unet_shortcut.train_unet_image_shortcut_policy.TrainDiffusionUnetImageWorkspace
 
 device: "cuda:0"
 
@@ -11,10 +11,12 @@ task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
+output_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
-num_inference_steps: 100
+num_inference_steps: 1
 n_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
@@ -22,7 +24,7 @@ keypoint_visible_rate: 1.0
 global_obs_cond: True
 
 policy:
-  _target_: diffusion_policy.unet.unet_image_policy.DiffusionUnetImagePolicy
+  _target_: shortcut_policy.unet_shortcut.unet_image_shortcut_policy.UnetImageShortcutPolicy
 
   shape_meta: ${shape_meta}
 
@@ -96,6 +98,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
+  measure_coverage: true
   device: ${device}
   seed: 42
   debug: False
@@ -103,7 +106,8 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 500
-  num_epochs: 8000
+  # From 8000 to 1000
+  num_epochs: 1000
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -120,6 +124,7 @@ training:
   max_val_steps: null
   # misc
   tqdm_interval_sec: 1.0
+  do_shortcut_speed_test: true
 
 logging:
   project: diffusion_policies

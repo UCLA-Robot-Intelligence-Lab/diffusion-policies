@@ -66,17 +66,16 @@ class PushTImageRunner:
             )
 
         env_fns = [env_fn] * n_envs
-        env_seeds = list()
-        env_prefixs = list()
-        env_init_fn_dills = list()
+        env_seeds = []
+        env_prefixs = []
+        env_init_fn_dills = []
+
         # train
         for i in range(n_train):
             seed = train_start_seed + i
             enable_render = i < n_train_vis
 
             def init_fn(env, seed=seed, enable_render=enable_render):
-                # setup rendering
-                # video_wrapper
                 assert isinstance(env.env, VideoRecordingWrapper)
                 env.env.video_recoder.stop()
                 env.env.file_path = None
@@ -85,10 +84,7 @@ class PushTImageRunner:
                         "media", wv.util.generate_id() + ".mp4"
                     )
                     filename.parent.mkdir(parents=False, exist_ok=True)
-                    filename = str(filename)
-                    env.env.file_path = filename
-
-                # set seed
+                    env.env.file_path = str(filename)
                 assert isinstance(env, MultiStepWrapper)
                 env.seed(seed)
 
@@ -102,8 +98,6 @@ class PushTImageRunner:
             enable_render = i < n_test_vis
 
             def init_fn(env, seed=seed, enable_render=enable_render):
-                # setup rendering
-                # video_wrapper
                 assert isinstance(env.env, VideoRecordingWrapper)
                 env.env.video_recoder.stop()
                 env.env.file_path = None
@@ -112,10 +106,7 @@ class PushTImageRunner:
                         "media", wv.util.generate_id() + ".mp4"
                     )
                     filename.parent.mkdir(parents=False, exist_ok=True)
-                    filename = str(filename)
-                    env.env.file_path = filename
-
-                # set seed
+                    env.env.file_path = str(filename)
                 assert isinstance(env, MultiStepWrapper)
                 env.seed(seed)
 
@@ -124,12 +115,6 @@ class PushTImageRunner:
             env_init_fn_dills.append(dill.dumps(init_fn))
 
         env = AsyncVectorEnv(env_fns)
-
-        # test env
-        # env.reset(seed=env_seeds)
-        # x = env.step(env.action_space.sample())
-        # imgs = env.call('render')
-        # import pdb; pdb.set_trace()
 
         self.env = env
         self.env_fns = env_fns
@@ -157,8 +142,10 @@ class PushTImageRunner:
         # allocate data
         all_video_paths = [None] * n_inits
         all_rewards = [None] * n_inits
+        all_coverage = [None] * n_inits
 
         for chunk_idx in range(n_chunks):
+
             start = chunk_idx * n_envs
             end = min(n_inits, start + n_envs)
             this_global_slice = slice(start, end)
@@ -176,47 +163,52 @@ class PushTImageRunner:
 
             # start rollout
             obs = env.reset()
+
             past_action = None
             policy.reset()
 
             pbar = tqdm.tqdm(
                 total=self.max_steps,
-                desc=f"Eval PushtImageRunner {chunk_idx+1}/{n_chunks}",
+                desc=f"Eval PushtImageRunner {chunk_idx + 1}/{n_chunks}",
                 leave=False,
                 mininterval=self.tqdm_interval_sec,
             )
             done = False
+            step_count = 0
+            coverage_values = []
             while not done:
-                # create obs dict
+                step_count += 1
+
                 np_obs_dict = dict(obs)
+
                 if self.past_action and (past_action is not None):
-                    # TODO: not tested
                     np_obs_dict["past_action"] = past_action[
                         :, -(self.num_obs_steps - 1) :
                     ].astype(np.float32)
 
-                # device transfer
                 obs_dict = dict_apply(
                     np_obs_dict, lambda x: torch.from_numpy(x).to(device=device)
                 )
 
-                # run policy
                 with torch.no_grad():
                     action_dict = policy.predict_action(obs_dict)
 
-                # device_transfer
                 np_action_dict = dict_apply(
                     action_dict, lambda x: x.detach().to("cpu").numpy()
                 )
 
                 action = np_action_dict["action"]
 
-                # step env
                 obs, reward, done, info = env.step(action)
+                for env_idx, info_dict in enumerate(info):
+                    coverage = info_dict.get("coverage", None)
+                    if coverage is not None:
+                        if len(coverage_values) <= env_idx:
+                            coverage_values.append([])
+                        coverage_values[env_idx].append(coverage)
+
                 done = np.all(done)
                 past_action = action
-
-                # update pbar
                 pbar.update(action.shape[1])
             pbar.close()
 
@@ -224,34 +216,26 @@ class PushTImageRunner:
             all_rewards[this_global_slice] = env.call("get_attr", "reward")[
                 this_local_slice
             ]
-        # clear out video buffer
-        _ = env.reset()
+            all_coverage[this_global_slice] = coverage_values
 
-        # log
+        _ = env.reset()
         max_rewards = collections.defaultdict(list)
-        log_data = dict()
-        # results reported in the paper are generated using the commented out line below
-        # which will only report and average metrics from first n_envs initial condition and seeds
-        # fortunately this won't invalidate our conclusion since
-        # 1. This bug only affects the variance of metrics, not their mean
-        # 2. All baseline methods are evaluated using the same code
-        # to completely reproduce reported numbers, uncomment this line:
-        # for i in range(len(self.env_fns)):
-        # and comment out this line
+        log_data = {}
         for i in range(n_inits):
             seed = self.env_seeds[i]
             prefix = self.env_prefixs[i]
             max_reward = np.max(all_rewards[i])
+            max_coverage = np.max(all_coverage[i])
             max_rewards[prefix].append(max_reward)
             log_data[prefix + f"sim_max_reward_{seed}"] = max_reward
-
-            # visualize sim
+            log_data[prefix + f"sim_max_coverage_{seed}"] = max_coverage
             video_path = all_video_paths[i]
             if video_path is not None:
-                sim_video = wandb.Video(video_path)
-                log_data[prefix + f"sim_video_{seed}"] = sim_video
-
-        # log aggregate metrics
+                try:
+                    sim_video = wandb.Video(video_path)
+                    log_data[prefix + f"sim_video_{seed}"] = sim_video
+                except Exception as e:
+                    print(f"Error loading video for seed {seed}: {e}")
         for prefix, value in max_rewards.items():
             name = prefix + "mean_score"
             value = np.mean(value)

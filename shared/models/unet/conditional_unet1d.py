@@ -255,6 +255,7 @@ class ConditionalUnet1D(nn.Module):
         mid_modules = self.mid_modules
         up_modules = self.up_modules
         final_projection = self.final_projection
+        timesteps_B = timesteps_B.to(sample_BTF.device)
 
         # Rearrange input; x : [ B F T ] -> [ B F T ] for convolutional layers.
         sample_BFT = einops.rearrange(sample_BTF, "B T F -> B F T")

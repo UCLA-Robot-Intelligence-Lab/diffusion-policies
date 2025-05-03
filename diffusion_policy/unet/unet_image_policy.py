@@ -369,3 +369,112 @@ class DiffusionUnetImagePolicy(nn.Module):
         ).mean()
 
         return loss
+
+    """
+    # ========= TESTING =========
+    # Should move this out long-term
+    # Might not need it?
+    def conditional_sample_test(
+        self,
+        cond_data_BTF: torch.Tensor,
+        cond_mask_BTF: torch.Tensor,
+        cond_BTL: Optional[torch.Tensor] = None,
+        cond_BG: Optional[torch.Tensor] = None,
+        generator: Optional[torch.Tensor] = None,
+        num_inference_steps: int = 10,
+        **kwargs,
+    ) -> torch.Tensor:
+        model = self.model
+        noise_scheduler = self.noise_scheduler
+        trajectory_BTF = torch.randn(
+            size=cond_data_BTF.shape,
+            dtype=cond_data_BTF.dtype,
+            device=cond_data_BTF.device,
+            generator=generator,
+        )
+
+        noise_scheduler.set_timesteps(num_inference_steps)
+
+        for t in noise_scheduler.timesteps:
+            trajectory_BTF[cond_mask_BTF] = cond_data_BTF[cond_mask_BTF]
+
+            denoised_trajectory_BTF = model(
+                sample_BTF=trajectory_BTF,
+                timesteps_B=t,
+                cond_BTL=cond_BTL,
+                cond_BG=cond_BG,
+            )
+
+            trajectory_BTF = noise_scheduler.step(
+                denoised_trajectory_BTF,
+                t,
+                trajectory_BTF,
+                generator=generator,
+                **kwargs,
+            ).prev_sample
+
+        trajectory_BTF[cond_mask_BTF] = cond_data_BTF[cond_mask_BTF]
+
+        return trajectory_BTF
+
+    def predict_action_test(
+        self, obs: Dict[str, torch.Tensor], num_inference_steps: int
+    ) -> Dict[str, torch.Tensor]:
+        normalizer = self.normalizer
+        obs_encoder = self.obs_encoder
+        global_obs_cond = self.global_obs_cond
+        device = self.device
+        dtype = self.dtype
+        T = self.horizon
+        Ta = self.num_action_steps
+        To = self.num_obs_steps
+        Fa = self.action_dim_Fa
+        Fo = self.obs_feat_dim_Fo
+        B = obs["image"].shape[0]
+
+        normalized_obs = normalizer.normalize(obs)
+
+        cond_BTL = None
+        cond_BG = None
+        if global_obs_cond:
+            flat_normalized_obs = dict_apply(
+                normalized_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
+            )
+            normalized_obs_feats = obs_encoder(flat_normalized_obs)
+            cond_BG = normalized_obs_feats.reshape(B, -1)
+            cond_data_BTF = torch.zeros(size=(B, T, Fa), device=device, dtype=dtype)
+            cond_mask_BTF = torch.zeros_like(cond_data_BTF, dtype=torch.bool)
+        else:
+            flat_normalized_obs = dict_apply(
+                normalized_obs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
+            )
+            normalized_obs_feats = obs_encoder(flat_normalized_obs)
+            normalized_obs_feats = normalized_obs_feats.reshape(B, To, -1)
+
+            cond_data_BTF = torch.zeros(
+                size=(B, T, Fa + Fo), device=device, dtype=dtype
+            )
+            cond_mask_BTF = torch.zeros_like(cond_data_BTF, dtype=torch.bool)
+
+            cond_data_BTF[:, :To, Fa:] = normalized_obs_feats
+            cond_mask_BTF[:, :To, Fa:] = True
+
+        sample_BTF = self.conditional_sample_test(
+            cond_data_BTF=cond_data_BTF,
+            cond_mask_BTF=cond_mask_BTF,
+            cond_BTL=cond_BTL,
+            cond_BG=cond_BG,
+            num_inference_steps=num_inference_steps,
+            **self.kwargs,
+        )
+
+        action_pred_BTFa = sample_BTF[..., :Fa]
+        action_pred_BTFa = normalizer["action"].unnormalize(action_pred_BTFa)
+
+        obs_act_horizon = To + Ta - 1
+        action_BTaFa = action_pred_BTFa[:, obs_act_horizon - Ta : obs_act_horizon]
+
+        result = {"action": action_BTaFa, "action_pred": action_pred_BTFa}
+
+        return result
+    """

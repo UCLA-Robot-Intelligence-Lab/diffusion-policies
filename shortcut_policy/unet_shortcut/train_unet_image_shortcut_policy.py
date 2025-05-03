@@ -30,12 +30,14 @@ import matplotlib.lines as mlines
 from hydra.core.hydra_config import HydraConfig
 from hydra import initialize, compose
 from omegaconf import OmegaConf
-from typing import Optional
+from typing import Optional, Dict, List
 from torch.utils.data import DataLoader
+from collections import defaultdict
 
-from diffusion_policy.unet.unet_image_policy import (
-    DiffusionUnetImagePolicy,
+from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
+    UnetImageShortcutPolicy,
 )
+
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
 from shared.utils.pytorch_util import (
@@ -56,7 +58,7 @@ class TrainDiffusionUnetImageWorkspace:
 
     def __init__(self, cfg: OmegaConf, output_dir: Optional[str] = None):
         self.cfg = cfg
-        self._output_dir = output_dir
+        self._output_dir = cfg.output_dir if "output_dir" in cfg else output_dir
         self._saving_thread = None
 
         # Set seed
@@ -65,10 +67,11 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
-        # Configure model
-        self.model: DiffusionUnetImagePolicy = hydra.utils.instantiate(cfg.policy)
+        # Create the model
+        self.model: UnetImageShortcutPolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: Optional[DiffusionUnetImagePolicy] = None
+        # Optionally create an EMA copy
+        self.ema_model: Optional[UnetImageShortcutPolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
@@ -81,12 +84,38 @@ class TrainDiffusionUnetImageWorkspace:
         self.global_step = 0
         self.epoch = 0
 
-        # Inference step testing
-        self.num_inference_steps_ls = [10, 16, 25, 50, 100]
+        # Shortcut steps we want to test
+        self.num_shortcut_steps = [1, 2, 4, 8, 16, 32, 64, 128]
+
+        # For logging speed vs. MSE
+        self.training_steps: List[int] = []
+        self.time_data = {f"Time_{s}": [] for s in self.num_shortcut_steps}
+        self.mse_data = {f"MSE_{s}": [] for s in self.num_shortcut_steps}
+        self.plot_log_interval = 1
+
+        # For coverage logging (track train and test separately)
+        # We'll store all coverage values to later compute both average & max
         self.coverage_data = {
-            "train": {s: [] for s in self.num_inference_steps_ls},
-            "test": {s: [] for s in self.num_inference_steps_ls},
+            "train": {s: [] for s in self.num_shortcut_steps},
+            "test": {s: [] for s in self.num_shortcut_steps},
         }
+
+        # Output dir
+        os.makedirs(self.output_dir, exist_ok=True)
+        print(f"Output directory set to: {self.output_dir}")
+
+        # Speed & MSE figure handles
+        self.speed_fig, self.speed_ax = plt.subplots(figsize=(10, 6))
+        self.speed_ax.set_xlabel("Global Step")
+        self.speed_ax.set_ylabel("Time Elapsed (s)")
+        self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
+        self.speed_path = os.path.join(self.output_dir, "shortcut_speed_test.png")
+
+        self.mse_fig, self.mse_ax = plt.subplots(figsize=(10, 6))
+        self.mse_ax.set_xlabel("Global Step")
+        self.mse_ax.set_ylabel("Mean Squared Error")
+        self.mse_ax.set_title("MSE across step sizes")
+        self.mse_path = os.path.join(self.output_dir, "shortcut_mse_per_num_steps.png")
 
     @property
     def output_dir(self):
@@ -94,6 +123,100 @@ class TrainDiffusionUnetImageWorkspace:
         if output_dir is None:
             output_dir = HydraConfig.get().runtime.output_dir
         return output_dir
+
+    def update_plot(self):
+        """Update & log the speed and MSE plots for the current self.global_step."""
+        custom_plots = []
+        # ---- SPEED PLOT ----
+        self.speed_ax.clear()
+        self.speed_ax.set_xlabel("Global Step")
+        self.speed_ax.set_ylabel("Time Elapsed (s)")
+        self.speed_ax.set_title("Shortcut Policy speed test across step sizes")
+        speed_legend_handles = []
+        for s in self.num_shortcut_steps:
+            steps = self.training_steps
+            times = self.time_data[f"Time_{s}"]
+            if len(steps) > 1:
+                self.speed_ax.plot(
+                    steps,
+                    times,
+                    linestyle="-",
+                    alpha=0.5,
+                    color=f"C{self.num_shortcut_steps.index(s)}",
+                )
+            self.speed_ax.scatter(
+                steps, times, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
+            )
+            speed_legend_handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    color=f"C{self.num_shortcut_steps.index(s)}",
+                    marker="o",
+                    linestyle="",
+                    label=f"Steps={s}",
+                )
+            )
+        self.speed_ax.legend(
+            handles=speed_legend_handles, fontsize=8, loc="upper right"
+        )
+
+        all_times = []
+        for sublist in self.time_data.values():
+            all_times.extend(sublist)
+        if len(all_times) > 1:
+            min_t, max_t = min(all_times), max(all_times)
+            if min_t < max_t:
+                self.speed_ax.set_yticks(np.linspace(min_t, max_t, num=5))
+
+        self.speed_fig.tight_layout()
+        custom_plots.append(wandb.Image(self.speed_fig))
+
+        # ---- MSE PLOT ----
+        self.mse_ax.clear()
+        self.mse_ax.set_xlabel("Global Step")
+        self.mse_ax.set_ylabel("Mean Squared Error")
+        self.mse_ax.set_title("MSE across step sizes")
+        mse_legend_handles = []
+        for s in self.num_shortcut_steps:
+            steps = self.training_steps
+            mse_vals = self.mse_data[f"MSE_{s}"]
+            if len(steps) > 1:
+                self.mse_ax.plot(
+                    steps,
+                    mse_vals,
+                    linestyle="-",
+                    alpha=0.5,
+                    color=f"C{self.num_shortcut_steps.index(s)}",
+                )
+            self.mse_ax.scatter(
+                steps, mse_vals, s=20, color=f"C{self.num_shortcut_steps.index(s)}"
+            )
+            mse_legend_handles.append(
+                mlines.Line2D(
+                    [],
+                    [],
+                    color=f"C{self.num_shortcut_steps.index(s)}",
+                    marker="o",
+                    linestyle="",
+                    label=f"Steps={s}",
+                )
+            )
+        self.mse_ax.legend(handles=mse_legend_handles, fontsize=8, loc="upper right")
+
+        all_mse_vals = []
+        for sublist in self.mse_data.values():
+            all_mse_vals.extend(sublist)
+        if len(all_mse_vals) > 1:
+            min_m, max_m = min(all_mse_vals), max(all_mse_vals)
+            if min_m < max_m:
+                self.mse_ax.set_yticks(np.linspace(min_m, max_m, num=5))
+
+        self.mse_fig.tight_layout()
+        custom_plots.append(wandb.Image(self.mse_fig))
+
+        # Log both in one go
+        wandb.log({"custom_plots": custom_plots}, step=self.global_step)
 
     def update_coverage_plot(self):
         coverage_fig, coverage_ax = plt.subplots(figsize=(10, 5))
@@ -106,7 +229,7 @@ class TrainDiffusionUnetImageWorkspace:
         coverage_max_train = []
         coverage_max_test = []
 
-        for s in self.num_inference_steps_ls:
+        for s in self.num_shortcut_steps:
             train_values = self.coverage_data["train"][s]
             test_values = self.coverage_data["test"][s]
 
@@ -124,7 +247,7 @@ class TrainDiffusionUnetImageWorkspace:
                 coverage_avgs_test.append(0.0)
                 coverage_max_test.append(0.0)
 
-        x_positions = np.arange(len(self.num_inference_steps_ls))
+        x_positions = np.arange(len(self.num_shortcut_steps))
         bar_width = 0.2
 
         # 1) Train Avg
@@ -165,7 +288,7 @@ class TrainDiffusionUnetImageWorkspace:
         )
 
         coverage_ax.set_xticks(x_positions)
-        coverage_ax.set_xticklabels([str(s) for s in self.num_inference_steps_ls])
+        coverage_ax.set_xticklabels([str(s) for s in self.num_shortcut_steps])
 
         all_values = (
             coverage_avgs_train
@@ -201,14 +324,12 @@ class TrainDiffusionUnetImageWorkspace:
         val_dataset = dataset.get_validation_dataset()
         val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
 
+        # Set normalizer
         self.model.set_normalizer(normalizer)
         if self.ema_model is not None:
             self.ema_model.set_normalizer(normalizer)
 
-        """
-        Learning rate scheduler updates learning rate dynamically during
-        training.
-        """
+        # LR Scheduler
         lr_scheduler = get_scheduler(
             cfg.training.lr_scheduler,
             optimizer=self.optimizer,
@@ -218,23 +339,17 @@ class TrainDiffusionUnetImageWorkspace:
             last_epoch=self.global_step - 1,
         )
 
-        """
-        EMA (exponential moving average) maintains a smoothed
-        version of the model weights. Shown to improve performance,
-        and the weighting of the weights favors the last few epochs.
-        """
+        # EMA
         ema: Optional[EMAModel] = None
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
-        """
-        The environment runner handles simulating the environment.
-        """
+        # Env runner
         env_runner = hydra.utils.instantiate(
             cfg.tasks.env_runner, output_dir=self.output_dir
         )
 
-        # Configure logging with Weights & Biases
+        # Init W&B
         wandb_run = wandb.init(
             dir=str(self.output_dir),
             config=OmegaConf.to_container(cfg, resolve=True),
@@ -242,25 +357,21 @@ class TrainDiffusionUnetImageWorkspace:
         )
         wandb.config.update({"output_dir": self.output_dir})
 
-        """
-        TopK Checkpoint manager works by maintaining top-K model
-        checkpoints based on performance.
-        """
+        # TopK manager
         topk_manager = TopKCheckpointManager(
             save_dir=os.path.join(self.output_dir, "checkpoints"), **cfg.checkpoint.topk
         )
 
-        # Device setup
+        # Device
         device = torch.device(cfg.training.device)
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
 
-        # Save batch for sampling
         train_sampling_batch = None
 
-        # Debug mode adjustments
+        # Debug adjustments
         if cfg.training.debug:
             cfg.training.num_epochs = 2
             cfg.training.max_train_steps = 3
@@ -270,12 +381,14 @@ class TrainDiffusionUnetImageWorkspace:
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-        # Training loop
         log_path = os.path.join(self.output_dir, "logs.json.txt")
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
+
                 step_log = {}
-                # ========= Train for this epoch ==========
+                # ---------------------------
+                # 1) TRAIN
+                # ---------------------------
                 if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
@@ -288,35 +401,30 @@ class TrainDiffusionUnetImageWorkspace:
                     mininterval=cfg.training.tqdm_interval_sec,
                 ) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
-                        # Device transfer
                         batch = dict_apply(
                             batch, lambda x: x.to(device, non_blocking=True)
                         )
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
 
-                        # Compute loss
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        # Step optimizer
                         if (
                             self.global_step % cfg.training.gradient_accumulate_every
-                            == 0
-                        ):
+                        ) == 0:
                             self.optimizer.step()
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
 
-                        # Update EMA
-                        if cfg.training.use_ema:
+                        if cfg.training.use_ema and ema is not None:
                             ema.step(self.model)
 
-                        # Logging
                         raw_loss_cpu = raw_loss.item()
                         tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                         train_losses.append(raw_loss_cpu)
+
                         step_log = {
                             "train_loss": raw_loss_cpu,
                             "global_step": self.global_step,
@@ -326,43 +434,44 @@ class TrainDiffusionUnetImageWorkspace:
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
                         if not is_last_batch:
-                            # Log intermediate steps
                             wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
 
-                        if cfg.training.max_train_steps is not None and batch_idx >= (
-                            cfg.training.max_train_steps - 1
+                        if (cfg.training.max_train_steps is not None) and (
+                            batch_idx >= (cfg.training.max_train_steps - 1)
                         ):
                             break
 
-                # At the end of each epoch, replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
-                # ========= Evaluation for this epoch ==========
-                policy = self.model
-                if cfg.training.use_ema:
-                    policy = self.ema_model
+                # ---------------------------
+                # 2) EVAL (Rollout & Coverage)
+                # ---------------------------
+                policy = self.model if not cfg.training.use_ema else self.ema_model
                 policy.eval()
 
-                # Run rollout
+                # Possibly rollout
                 if (self.epoch % cfg.training.rollout_every) == 0:
                     runner_log = env_runner.run(policy)
-                    # Log all
                     step_log.update(runner_log)
 
                 # Coverage logging, track separately for train vs test
-                if cfg.training.get("measure_coverage", False) and (
-                    self.epoch % cfg.training.rollout_every == 0
+                if (
+                    cfg.training.get("measure_coverage", False)
+                    and (self.epoch % cfg.training.rollout_every) == 0
                 ):
                     coverage_log_dict = {}
-                    for s in self.num_inference_steps_ls:
+                    for s in self.num_shortcut_steps:
                         with temporary_attribute(policy, "num_inference_steps", s):
+                            # env_runner might produce multiple coverage keys,
+                            # e.g. "train/sim_max_coverage_X" or "test/sim_max_coverage_X"
                             runner_log_s = env_runner.run(policy)
                         for k, v in runner_log_s.items():
                             if "sim_max_coverage_" in k:
                                 coverage_val = float(v)
+                                # Decide which side (train/test) to store
                                 if k.startswith("train"):
                                     self.coverage_data["train"][s].append(coverage_val)
                                     coverage_log_dict[f"train_{s}_coverage/{k}"] = (
@@ -370,14 +479,16 @@ class TrainDiffusionUnetImageWorkspace:
                                     )
                                 elif k.startswith("test"):
                                     self.coverage_data["test"][s].append(coverage_val)
-                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
+                                    coverage_log_dict[f"test_{s}_coverage/{k}"] = (
                                         coverage_val
                                     )
 
+                    # Update the grouped bar chart for coverage
                     self.update_coverage_plot()
+                    # Also log raw coverage values
                     wandb.log(coverage_log_dict, step=self.global_step)
 
-                # Run validation
+                # Validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
                         val_losses = []
@@ -400,13 +511,13 @@ class TrainDiffusionUnetImageWorkspace:
                                     break
                         if len(val_losses) > 0:
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # Log epoch average validation loss
                             step_log["val_loss"] = val_loss
 
-                # Run diffusion sampling on a training batch
+                # ---------------------------
+                # 3) SAMPLING & SHORTCUT TEST
+                # ---------------------------
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
-                        # Sample trajectory from training set, and evaluate difference
                         batch = dict_apply(
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
@@ -414,48 +525,51 @@ class TrainDiffusionUnetImageWorkspace:
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
 
-                        t0 = time.time()
-                        result = policy.predict_action(obs_dict)
-                        t1 = time.time()
-
+                        # Normal sampling
+                        result = policy.predict_action_shortcut(obs_dict)
                         pred_action = result["action_pred"]
+                        mse_val = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        step_log["train_action_mse_error"] = mse_val.item()
 
-                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                        step_log["train_action_mse_error"] = mse.item()
+                        # Speed & MSE
+                        for s in self.num_shortcut_steps:
+                            t0 = time.time()
+                            result_n = policy.predict_action_shortcut(obs_dict, s)
+                            t1 = time.time()
 
-                        # Track time elapsed for diffusion policy
-                        elapsed_time = t1 - t0
-                        step_log["time_elapsed_predict_action"] = elapsed_time
+                            pred_n = result_n["action_pred"]
+                            mse_n = torch.nn.functional.mse_loss(pred_n, gt_action)
 
-                        del batch
-                        del obs_dict
-                        del gt_action
-                        del result
-                        del pred_action
-                        del mse
+                            self.time_data[f"Time_{s}"].append(t1 - t0)
+                            self.mse_data[f"MSE_{s}"].append(mse_n.item())
 
-                # Checkpointing
+                        self.training_steps.append(self.global_step)
+                        if (self.global_step % self.plot_log_interval) == 0:
+                            self.update_plot()
+
+                        del batch, obs_dict, gt_action, result, pred_action, mse_val
+
+                # ---------------------------
+                # 4) CHECKPOINT
+                # ---------------------------
                 if (self.epoch % cfg.training.checkpoint_every) == 0:
-                    # Save checkpoints and snapshots
                     if cfg.checkpoint.save_last_ckpt:
                         self.save_checkpoint()
                     if cfg.checkpoint.save_last_snapshot:
                         self.save_snapshot()
 
-                    # Sanitize metric names
                     metric_dict = {k.replace("/", "_"): v for k, v in step_log.items()}
-
-                    # Manage Top-K checkpoints
                     topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
                     if topk_ckpt_path is not None:
                         self.save_checkpoint(path=topk_ckpt_path)
 
-                # ========= End of Evaluation ==========
+                # Return to train mode
                 policy.train()
 
-                # End of epoch logging
+                # Log final step metrics
                 wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
+
                 self.global_step += 1
                 self.epoch += 1
 
@@ -480,15 +594,17 @@ class TrainDiffusionUnetImageWorkspace:
         payload = {"cfg": self.cfg, "state_dicts": {}, "pickles": {}}
 
         for key, value in self.__dict__.items():
+            # Save state_dicts for modules like model, optimizer, etc.
             if hasattr(value, "state_dict") and hasattr(value, "load_state_dict"):
-                # Modules, optimizers, etc.
                 if key not in exclude_keys:
                     if use_thread:
                         payload["state_dicts"][key] = copy_to_cpu(value.state_dict())
                     else:
                         payload["state_dicts"][key] = value.state_dict()
+            # Save certain attributes as pickles
             elif key in include_keys:
                 payload["pickles"][key] = dill.dumps(value)
+
         if use_thread:
             self._saving_thread = threading.Thread(
                 target=lambda: torch.save(payload, path.open("wb"), pickle_module=dill)
@@ -515,7 +631,12 @@ class TrainDiffusionUnetImageWorkspace:
                 self.__dict__[key] = dill.loads(payload["pickles"][key])
 
     def load_checkpoint(
-        self, path=None, tag="latest", exclude_keys=None, include_keys=None, **kwargs
+        self,
+        path=None,
+        tag="latest",
+        exclude_keys=None,
+        include_keys=None,
+        **kwargs,
     ):
         if path is None:
             path = self.get_checkpoint_path(tag=tag)
@@ -526,12 +647,6 @@ class TrainDiffusionUnetImageWorkspace:
         return payload
 
     def save_snapshot(self, tag="latest"):
-        """
-        Quick loading and saving for research, saves full state of the workspace.
-
-        However, loading a snapshot assumes the code stays exactly the same.
-        Use save_checkpoint for long-term storage.
-        """
         path = pathlib.Path(self.output_dir).joinpath("snapshots", f"{tag}.pkl")
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self, path.open("wb"), pickle_module=dill)
@@ -545,7 +660,7 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name="train_unet_image_policy_ddim",
+    config_name="train_unet_image_shortcut_policy",
 )
 def main(cfg):
     workspace = TrainDiffusionUnetImageWorkspace(cfg)
