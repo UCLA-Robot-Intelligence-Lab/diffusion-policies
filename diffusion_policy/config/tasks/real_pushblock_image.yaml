@@ -1,0 +1,35 @@
+name: real_pushblock_image
+
+image_shape: &image_shape [3, 240, 240]
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  obs:
+    camera_0:
+      shape: ${task.image_shape}
+      type: rgb
+    camera_1:
+      shape: ${task.image_shape}
+      type: rgb
+    robot_eef_pose:
+      shape: [2]
+      type: low_dim
+  action:
+    shape: [2]
+
+env_runner:
+  _target_: shared.env.pushblock.pushblock_image_runner.PushBlockImageRunner
+  output_dir: ${hydra:runtime.output_dir}
+
+dataset:
+  _target_: shared.env.pushblock.pushblock_image_dataset.PushBlockImageDataset
+  zarr_path: data/pushblock/pushblock_real_data.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${num_obs_steps}-1'}
+  pad_after: ${eval:'${num_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.00
+  max_train_episodes: 50
+  num_obs_steps: ${dataset_obs_steps}
+  num_latency_steps: ${n_latency_steps}
+  delta_action: True
+  process_video: True
