@@ -99,7 +99,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 50
-  checkpoint_every: 50
+  checkpoint_every: 1
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -119,10 +119,10 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: test_mean_score
+    monitor_key: train_loss
     mode: max
     k: 5
-    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 
