@@ -1,21 +1,16 @@
 import torch
 import numpy as np
 import copy
-import cv2
 import os
-import zarr
-from pathlib import Path
-from threadpoolctl import threadpool_limits
-
-from typing import Dict
+from typing import Dict, Union
 from torch.utils.data import Dataset
 from shared.utils.pytorch_util import dict_apply
-from shared.models.common.normalizer import LinearNormalizer
+from shared.models.common.normalizer import LinearNormalizer, NestedDictNormalizer
 from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
-from shared.utils.normalize_util import get_image_range_normalizer
+import torch.nn as nn
 
-class PushBlockImageDataset(Dataset):
+class PushBlockLowdimDataset(Dataset):
     def __init__(
         self,
         zarr_path,
@@ -30,7 +25,7 @@ class PushBlockImageDataset(Dataset):
         delta_action=False,
     ):
         """
-        Dataset for real robot pushblock image data.
+        Dataset for real robot pushblock lowdim data.
         
         Args:
             zarr_path: Path to zarr data
@@ -46,19 +41,20 @@ class PushBlockImageDataset(Dataset):
         """
         super().__init__()
         
-        # First load low-dimensional data
-        dataset_path = os.path.dirname(zarr_path)
+        # Load low-dimensional data
         low_dim_keys = ["robot_eef_pose", "action"]
         
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=low_dim_keys
         )
+        
         # Convert to delta actions if needed
         if delta_action:
             # Replace action as relative to previous frame
             actions = self.replay_buffer['action'][:]
-            # Support positions only at this time
-            assert actions.shape[1] <= 3
+            # Print action shape for debugging
+            print(actions.shape)
+            # Support actions of any dimension
             actions_diff = np.zeros_like(actions)
             episode_ends = self.replay_buffer.episode_ends[:]
             for i in range(len(episode_ends)):
@@ -84,10 +80,8 @@ class PushBlockImageDataset(Dataset):
         # Setup key_first_k for num_obs_steps
         key_first_k = dict()
         if num_obs_steps is not None:
-            # Only take first k obs from images and state
-            # for key in ["camera_0", "camera_1", "robot_eef_pose"]:
-            for key in ["robot_eef_pose"]:
-                key_first_k[key] = num_obs_steps
+            # Only take first k obs from robot state
+            key_first_k["robot_eef_pose"] = num_obs_steps
 
         # Create sampler
         self.sampler = SequenceSampler(
@@ -120,19 +114,17 @@ class PushBlockImageDataset(Dataset):
         return val_set
 
     def get_normalizer(self, mode="limits", **kwargs):
-        # Create normalizer for actions and robot_eef_pose
-        normalizer = LinearNormalizer()
+        # Create nested dict normalizer for handling obs dictionary
+        normalizer = NestedDictNormalizer()
         
-        # Fit normalizer on action and robot_eef_pose
+        # Create data structure with proper nesting for obs
         data = {
             "action": self.replay_buffer["action"],
-            "robot_eef_pose": self.replay_buffer["robot_eef_pose"],
+            "obs": {
+                "robot_eef_pose": self.replay_buffer["robot_eef_pose"]
+            }
         }
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
-        
-        # Image normalizers (range [0,1])
-        # normalizer["camera_0"] = get_image_range_normalizer()
-        # normalizer["camera_1"] = get_image_range_normalizer()
         
         return normalizer
 
@@ -152,15 +144,6 @@ class PushBlockImageDataset(Dataset):
         # Process observations
         obs_dict = dict()
         
-        # Process RGB observations (camera images)
-        """
-        for key in ["camera_0", "camera_1"]:
-            # Convert from NHWC to NCHW format and normalize to [0,1]
-            obs_dict[key] = np.moveaxis(data[key][T_slice], -1, 1).astype(np.float32) / 255.0
-            # Save RAM
-            del data[key]
-        """
-            
         # Process low-dim observations (robot state)
         obs_dict["robot_eef_pose"] = data["robot_eef_pose"][T_slice].astype(np.float32)
         del data["robot_eef_pose"]
@@ -183,17 +166,24 @@ class PushBlockImageDataset(Dataset):
 def test():
     import os
 
-    zarr_path = os.path.expanduser("data/pushblock/pushblock_real_data.zarr")
-    dataset = PushBlockImageDataset(zarr_path, horizon=16, delta_action=True)
+    zarr_path = os.path.expanduser("data/pushblock_real/replay_buffer.zarr")
+    dataset = PushBlockLowdimDataset(zarr_path, horizon=16, delta_action=True)
     
     # Test getting an item
     item = dataset[0]
-    print(f"Item shapes: {item['obs']['camera_0'].shape}, {item['action'].shape}")
+    print(f"Item shapes: {item['obs']['robot_eef_pose'].shape}, {item['action'].shape}")
     
     # Test normalizer
     normalizer = dataset.get_normalizer()
-    print(f"Normalizer keys: {normalizer.keys()}")
+    # Print normalizer structure
+    print(f"Normalizer parameters: action and obs.robot_eef_pose")
+    
+    # Just print normalizer params
+    print(f"Done creating normalizer")
     
     # Test action values with delta actions
     actions = dataset.replay_buffer["action"][:]
-    print(f"Action mean: {np.mean(actions, axis=0)}, std: {np.std(actions, axis=0)}") 
+    print(f"Action mean: {np.mean(actions, axis=0)}, std: {np.std(actions, axis=0)}")
+
+if __name__ == "__main__":
+    test() 

@@ -33,9 +33,7 @@ from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
 
-from diffusion_policy.unet.unet_image_policy import (
-    DiffusionUnetImagePolicy,
-)
+from diffusion_policy.unet.unet_lowdim_policy import DiffusionUnetLowdimPolicy
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
 from shared.utils.pytorch_util import (
@@ -50,7 +48,7 @@ from shared.models.common.lr_scheduler import get_scheduler
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
-class TrainDiffusionUnetImageWorkspace:
+class TrainDiffusionUnetLowdimWorkspace:
     include_keys = ("global_step", "epoch")
     exclude_keys = ()
 
@@ -65,10 +63,14 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
+        # Debug print
+        print(f"Creating model with: obs_dim={cfg.obs_dim}, action_dim={cfg.action_dim}, num_obs_steps={cfg.num_obs_steps}")
+        print(f"Expected global cond dim: {cfg.obs_dim * cfg.num_obs_steps}, cond_dim_G in config: {cfg.policy.model.cond_dim_G}")
+        
         # Configure model
-        self.model: DiffusionUnetImagePolicy = hydra.utils.instantiate(cfg.policy)
+        self.model: DiffusionUnetLowdimPolicy = hydra.utils.instantiate(cfg.policy)
 
-        self.ema_model: Optional[DiffusionUnetImagePolicy] = None
+        self.ema_model: Optional[DiffusionUnetLowdimPolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
@@ -276,10 +278,6 @@ class TrainDiffusionUnetImageWorkspace:
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = {}
                 # ========= Train for this epoch ==========
-                if cfg.training.freeze_encoder:
-                    self.model.obs_encoder.eval()
-                    self.model.obs_encoder.requires_grad_(False)
-
                 train_losses = []
                 with tqdm.tqdm(
                     train_dataloader,
@@ -411,7 +409,7 @@ class TrainDiffusionUnetImageWorkspace:
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
                         )
-                        obs_dict = batch["obs"]
+                        obs_dict = {'obs': batch['obs']}
                         gt_action = batch["action"]
 
                         t0 = time.time()
@@ -545,12 +543,12 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name="train_unet_image_real_policy",
+    config_name="train_unet_lowdim_real_policy",
 )
 def main(cfg):
-    workspace = TrainDiffusionUnetImageWorkspace(cfg)
+    workspace = TrainDiffusionUnetLowdimWorkspace(cfg)
     workspace.run()
 
 
 if __name__ == "__main__":
-    main()
+    main() 

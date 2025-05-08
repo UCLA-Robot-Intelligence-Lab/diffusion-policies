@@ -1,14 +1,15 @@
 defaults:
   - _self_
-  - tasks: real_pushblock_image
+  - tasks: real_pushblock_lowdim
 
-name: train_diffusion_pushblock_real_image_${num_inference_steps}
-_target_: diffusion_policy.unet.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
+name: train_diffusion_pushblock_real_lowdim_${num_inference_steps}
+_target_: diffusion_policy.unet.train_unet_lowdim_policy.TrainDiffusionUnetLowdimWorkspace
 
-device: "cuda:3"
+device: "cuda:0"
 
 task_name: ${tasks.name}
-shape_meta: ${tasks.shape_meta}
+obs_dim: 6  # robot_eef_pose dimension
+action_dim: 7  # action dimension
 exp_name: "default"
 
 horizon: 16
@@ -18,13 +19,22 @@ num_inference_steps: 100
 n_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
-keypoint_visible_rate: 1.0
-global_obs_cond: True
+obs_as_global_cond: True
+pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.unet.unet_image_policy.DiffusionUnetImagePolicy
+  _target_: diffusion_policy.unet.unet_lowdim_policy.DiffusionUnetLowdimPolicy
 
-  shape_meta: ${shape_meta}
+  model:
+    _target_: shared.models.unet.conditional_unet1d.ConditionalUnet1D
+    inp_dim_F: ${eval:'${action_dim} if ${obs_as_global_cond} else ${obs_dim} + ${action_dim}'}
+    cond_dim_L: null
+    cond_dim_G: ${eval:'${obs_dim} * ${num_obs_steps} if ${obs_as_global_cond} else null'}
+    embed_dim_D: 128
+    down_dims: [256, 512, 1024]
+    kernel_size: 5
+    num_groups: 8
+    film_modulation_scale: True
 
   noise_scheduler:
     _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
@@ -36,30 +46,15 @@ policy:
     clip_sample: True
     prediction_type: epsilon
 
-  obs_encoder:
-    _target_: shared.vision.common.multi_image_obs_encoder.ObsEncoder
-    shape_meta: ${shape_meta}
-    vision_backbone:
-      _target_: shared.vision.resnet.model_getter.get_resnet
-      name: resnet18
-      weights: null
-    resize_shape: [240, 320]
-    crop_shape: [216, 288]
-    random_crop: True
-    use_group_norm: True
-    share_vision_backbone: False
-    imagenet_norm: True
-
   horizon: ${horizon}
-  num_action_steps: ${eval:'${num_action_steps}+${n_latency_steps}'}
-  num_obs_steps: ${num_obs_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  n_action_steps: ${num_action_steps}
+  n_obs_steps: ${num_obs_steps}
   num_inference_steps: ${num_inference_steps}
-  global_obs_cond: ${global_obs_cond}
-  embed_dim_D: 128
-  down_dims: [512, 1024, 2048]
-  kernel_size: 5
-  num_groups: 8
-  film_modulation_scale: True
+  obs_as_local_cond: False
+  obs_as_global_cond: ${obs_as_global_cond}
+  pred_action_steps_only: ${pred_action_steps_only}
 
 ema:
   _target_: shared.models.unet.ema_model.EMAModel
@@ -70,14 +65,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 64
+  batch_size: 256
   num_workers: 4
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 64
+  batch_size: 256
   num_workers: 4
   shuffle: False
   pin_memory: True
@@ -94,14 +89,13 @@ training:
   device: ${device}
   seed: 42
   debug: False
-  resume: False
+  resume: True
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 500
   num_epochs: 5000
   gradient_accumulate_every: 1
   use_ema: True
-  freeze_encoder: False
   # training loop control
   # in epochs
   rollout_every: 50
@@ -125,10 +119,10 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: train_loss
-    mode: min
+    monitor_key: test_mean_score
+    mode: max
     k: 5
-    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 
@@ -143,4 +137,4 @@ hydra:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
   sweep:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
-    subdir: ${hydra.job.num}
+    subdir: ${hydra.job.num} 

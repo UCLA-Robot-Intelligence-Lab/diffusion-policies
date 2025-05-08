@@ -5,10 +5,10 @@ shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
   obs:
     camera_0:
-      shape: ${task.image_shape}
+      shape: *image_shape
       type: rgb
     camera_1:
-      shape: ${task.image_shape}
+      shape: *image_shape
       type: rgb
     robot_eef_pose:
       shape: [2]
@@ -22,7 +22,7 @@ env_runner:
 
 dataset:
   _target_: shared.env.pushblock.pushblock_image_dataset.PushBlockImageDataset
-  zarr_path: data/pushblock/pushblock_real_data.zarr
+  zarr_path: data/pushblock_real/replay_buffer.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}
@@ -32,4 +32,4 @@ dataset:
   num_obs_steps: ${dataset_obs_steps}
   num_latency_steps: ${n_latency_steps}
   delta_action: True
-  process_video: True
+
