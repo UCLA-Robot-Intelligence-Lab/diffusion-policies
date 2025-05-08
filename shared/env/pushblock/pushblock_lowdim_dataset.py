@@ -8,7 +8,6 @@ from shared.utils.pytorch_util import dict_apply
 from shared.models.common.normalizer import LinearNormalizer, NestedDictNormalizer
 from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
-import torch.nn as nn
 
 class PushBlockLowdimDataset(Dataset):
     def __init__(
@@ -41,20 +40,15 @@ class PushBlockLowdimDataset(Dataset):
         """
         super().__init__()
         
-        # Load low-dimensional data
         low_dim_keys = ["robot_eef_pose", "action"]
         
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=low_dim_keys
         )
         
-        # Convert to delta actions if needed
         if delta_action:
-            # Replace action as relative to previous frame
             actions = self.replay_buffer['action'][:]
-            # Print action shape for debugging
             print(actions.shape)
-            # Support actions of any dimension
             actions_diff = np.zeros_like(actions)
             episode_ends = self.replay_buffer.episode_ends[:]
             for i in range(len(episode_ends)):
@@ -62,13 +56,9 @@ class PushBlockLowdimDataset(Dataset):
                 if i > 0:
                     start = episode_ends[i-1]
                 end = episode_ends[i]
-                # Delta action is the difference between previous desired position and the current
-                # It should be scheduled at the previous timestep for the current timestep
-                # to ensure consistency with positional mode
                 actions_diff[start+1:end] = np.diff(actions[start:end], axis=0)
             self.replay_buffer['action'][:] = actions_diff
         
-        # Setup train/validation split
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, val_ratio=val_ratio, seed=seed
         )
@@ -77,13 +67,10 @@ class PushBlockLowdimDataset(Dataset):
             mask=train_mask, max_n=max_train_episodes, seed=seed
         )
         
-        # Setup key_first_k for num_obs_steps
         key_first_k = dict()
         if num_obs_steps is not None:
-            # Only take first k obs from robot state
             key_first_k["robot_eef_pose"] = num_obs_steps
 
-        # Create sampler
         self.sampler = SequenceSampler(
             replay_buffer=self.replay_buffer,
             sequence_length=horizon+num_latency_steps,
@@ -114,7 +101,6 @@ class PushBlockLowdimDataset(Dataset):
         return val_set
 
     def get_normalizer(self, mode="limits", **kwargs):
-        # Create nested dict normalizer for handling obs dictionary
         normalizer = NestedDictNormalizer()
         
         # Create data structure with proper nesting for obs
@@ -135,27 +121,20 @@ class PushBlockLowdimDataset(Dataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        # Get sequence data from sampler
         data = self.sampler.sample_sequence(idx)
         
-        # When self.num_obs_steps is None, this slice does nothing (takes all)
         T_slice = slice(self.num_obs_steps)
         
-        # Process observations
         obs_dict = dict()
         
-        # Process low-dim observations (robot state)
         obs_dict["robot_eef_pose"] = data["robot_eef_pose"][T_slice].astype(np.float32)
         del data["robot_eef_pose"]
         
-        # Process actions
         action = data["action"].astype(np.float32)
-        
-        # Handle latency by dropping first num_latency_steps action
+    
         if self.num_latency_steps > 0:
             action = action[self.num_latency_steps:]
             
-        # Convert to torch tensors
         torch_data = {
             "obs": dict_apply(obs_dict, torch.from_numpy),
             "action": torch.from_numpy(action)

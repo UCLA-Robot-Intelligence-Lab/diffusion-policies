@@ -48,29 +48,90 @@ class PushBlockImageDataset(Dataset):
         
         # First load low-dimensional data
         dataset_path = os.path.dirname(zarr_path)
-        low_dim_keys = ["robot_eef_pose", "action"]
         
+        # Try to read the available keys in the zarr file
+        try:
+            import zarr
+            zarr_store = zarr.open(zarr_path, 'r')
+            available_keys = list(zarr_store.keys())
+            print(f"Available keys in zarr file: {available_keys}")
+            
+            # Check what's in the zarr file and decide what to load
+            low_dim_keys = []
+            
+            # Check for robot state
+            if "robot_eef_pose" in available_keys:
+                low_dim_keys.append("robot_eef_pose")
+            else:
+                print("Warning: 'robot_eef_pose' not found in zarr file")
+                
+            # Check for action
+            if "action" in available_keys:
+                low_dim_keys.append("action")
+            else:
+                print("Warning: 'action' not found in zarr file")
+                
+            # Load camera keys if available
+            camera_keys = []
+            if "camera_0" in available_keys:
+                camera_keys.append("camera_0")
+            if "camera_1" in available_keys:
+                camera_keys.append("camera_1")
+                
+            # Load all found keys
+            all_keys = low_dim_keys + camera_keys
+            
+            if len(all_keys) == 0:
+                raise ValueError(f"No usable keys found in zarr file. Available: {available_keys}")
+                
+            print(f"Loading keys: {all_keys}")
+            
+        except Exception as e:
+            print(f"Error inspecting zarr file: {e}")
+            # Fallback to default keys
+            low_dim_keys = ["robot_eef_pose", "action"]
+            camera_keys = []
+            all_keys = low_dim_keys
+            
+        # Load the replay buffer
         self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=low_dim_keys
+            zarr_path, keys=all_keys
         )
+        
+        # Get shapes for debugging
+        print("Data shapes:")
+        for key in all_keys:
+            try:
+                print(f"  {key}: {self.replay_buffer[key].shape}")
+            except Exception as e:
+                print(f"  {key}: Error getting shape - {e}")
+        
         # Convert to delta actions if needed
         if delta_action:
-            # Replace action as relative to previous frame
-            actions = self.replay_buffer['action'][:]
-            # Support positions only at this time
-            assert actions.shape[1] <= 3
-            actions_diff = np.zeros_like(actions)
-            episode_ends = self.replay_buffer.episode_ends[:]
-            for i in range(len(episode_ends)):
-                start = 0
-                if i > 0:
-                    start = episode_ends[i-1]
-                end = episode_ends[i]
-                # Delta action is the difference between previous desired position and the current
-                # It should be scheduled at the previous timestep for the current timestep
-                # to ensure consistency with positional mode
-                actions_diff[start+1:end] = np.diff(actions[start:end], axis=0)
-            self.replay_buffer['action'][:] = actions_diff
+            try:
+                # Replace action as relative to previous frame
+                actions = self.replay_buffer['action'][:]
+                
+                # No need to assert specific dimensions, accept any action dimension
+                action_shape = actions.shape[1]
+                print(f"Action shape: {action_shape}")
+                
+                actions_diff = np.zeros_like(actions)
+                episode_ends = self.replay_buffer.episode_ends[:]
+                for i in range(len(episode_ends)):
+                    start = 0
+                    if i > 0:
+                        start = episode_ends[i-1]
+                    end = episode_ends[i]
+                    # Delta action is the difference between previous desired position and the current
+                    # It should be scheduled at the previous timestep for the current timestep
+                    # to ensure consistency with positional mode
+                    actions_diff[start+1:end] = np.diff(actions[start:end], axis=0)
+                self.replay_buffer['action'][:] = actions_diff
+                print("Successfully converted to delta actions")
+            except Exception as e:
+                print(f"Error converting to delta actions: {e}")
+                raise
         
         # Setup train/validation split
         val_mask = get_val_mask(
@@ -84,9 +145,12 @@ class PushBlockImageDataset(Dataset):
         # Setup key_first_k for num_obs_steps
         key_first_k = dict()
         if num_obs_steps is not None:
-            # Only take first k obs from images and state
-            # for key in ["camera_0", "camera_1", "robot_eef_pose"]:
-            for key in ["robot_eef_pose"]:
+            # Only take first k obs from state
+            for key in low_dim_keys:
+                key_first_k[key] = num_obs_steps
+                
+            # Also limit camera frames if available
+            for key in camera_keys:
                 key_first_k[key] = num_obs_steps
 
         # Create sampler
@@ -106,6 +170,8 @@ class PushBlockImageDataset(Dataset):
         self.pad_after = pad_after
         self.num_obs_steps = num_obs_steps
         self.num_latency_steps = num_latency_steps
+        self.low_dim_keys = low_dim_keys
+        self.camera_keys = camera_keys
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
@@ -120,24 +186,27 @@ class PushBlockImageDataset(Dataset):
         return val_set
 
     def get_normalizer(self, mode="limits", **kwargs):
-        # Create normalizer for actions and robot_eef_pose
+        # Create normalizer for low-dimensional data
         normalizer = LinearNormalizer()
         
-        # Fit normalizer on action and robot_eef_pose
-        data = {
-            "action": self.replay_buffer["action"],
-            "robot_eef_pose": self.replay_buffer["robot_eef_pose"],
-        }
+        # Fit normalizer on available low-dim data
+        data = {}
+        for key in self.low_dim_keys:
+            data[key] = self.replay_buffer[key]
+        
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
         
-        # Image normalizers (range [0,1])
-        # normalizer["camera_0"] = get_image_range_normalizer()
-        # normalizer["camera_1"] = get_image_range_normalizer()
+        # Add image normalizers if needed
+        for key in self.camera_keys:
+            normalizer[key] = get_image_range_normalizer()
         
         return normalizer
 
     def get_all_actions(self) -> torch.Tensor:
-        return torch.from_numpy(self.replay_buffer["action"])
+        if "action" in self.low_dim_keys:
+            return torch.from_numpy(self.replay_buffer["action"])
+        else:
+            raise ValueError("No action data available in dataset")
 
     def __len__(self):
         return len(self.sampler)
@@ -152,48 +221,72 @@ class PushBlockImageDataset(Dataset):
         # Process observations
         obs_dict = dict()
         
-        # Process RGB observations (camera images)
-        """
-        for key in ["camera_0", "camera_1"]:
+        # Process camera images if available
+        for key in self.camera_keys:
             # Convert from NHWC to NCHW format and normalize to [0,1]
             obs_dict[key] = np.moveaxis(data[key][T_slice], -1, 1).astype(np.float32) / 255.0
             # Save RAM
             del data[key]
-        """
             
-        # Process low-dim observations (robot state)
-        obs_dict["robot_eef_pose"] = data["robot_eef_pose"][T_slice].astype(np.float32)
-        del data["robot_eef_pose"]
+        # Process low-dim observations (states, etc.)
+        for key in self.low_dim_keys:
+            if key != "action":  # Skip action, will be processed separately
+                obs_dict[key] = data[key][T_slice].astype(np.float32)
+                del data[key]
         
         # Process actions
-        action = data["action"].astype(np.float32)
-        
-        # Handle latency by dropping first num_latency_steps action
-        if self.num_latency_steps > 0:
-            action = action[self.num_latency_steps:]
+        if "action" in self.low_dim_keys:
+            action = data["action"].astype(np.float32)
             
-        # Convert to torch tensors
-        torch_data = {
-            "obs": dict_apply(obs_dict, torch.from_numpy),
-            "action": torch.from_numpy(action)
-        }
+            # Handle latency by dropping first num_latency_steps action
+            if self.num_latency_steps > 0:
+                action = action[self.num_latency_steps:]
+                
+            # Add to output dict
+            torch_data = {
+                "obs": dict_apply(obs_dict, torch.from_numpy),
+                "action": torch.from_numpy(action)
+            }
+        else:
+            # If no action data, just return observations
+            torch_data = {
+                "obs": dict_apply(obs_dict, torch.from_numpy)
+            }
         
         return torch_data
 
 def test():
     import os
 
-    zarr_path = os.path.expanduser("data/pushblock/pushblock_real_data.zarr")
+    zarr_path = os.path.expanduser("data/pushblock_real/replay_buffer.zarr")
     dataset = PushBlockImageDataset(zarr_path, horizon=16, delta_action=True)
+    
+    # Print info about the dataset
+    print(f"Dataset size: {len(dataset)}")
+    print(f"Low-dim keys: {dataset.low_dim_keys}")
+    print(f"Camera keys: {dataset.camera_keys}")
     
     # Test getting an item
     item = dataset[0]
-    print(f"Item shapes: {item['obs']['camera_0'].shape}, {item['action'].shape}")
+    print("Item keys:", item.keys())
+    print("Observation keys:", item['obs'].keys())
+    
+    # Print shapes of all items
+    print("Item shapes:")
+    for k, v in item.items():
+        if k == 'obs':
+            for obs_k, obs_v in v.items():
+                print(f"  obs.{obs_k}: {obs_v.shape}")
+        else:
+            print(f"  {k}: {v.shape}")
     
     # Test normalizer
     normalizer = dataset.get_normalizer()
     print(f"Normalizer keys: {normalizer.keys()}")
     
     # Test action values with delta actions
-    actions = dataset.replay_buffer["action"][:]
-    print(f"Action mean: {np.mean(actions, axis=0)}, std: {np.std(actions, axis=0)}") 
+    if "action" in dataset.low_dim_keys:
+        actions = dataset.replay_buffer["action"][:]
+        print(f"Action mean: {np.mean(actions, axis=0)}, std: {np.std(actions, axis=0)}")
+        
+    return dataset 

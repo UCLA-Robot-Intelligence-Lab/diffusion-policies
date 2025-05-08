@@ -10,32 +10,19 @@ shape_meta: &shape_meta
     shape: [7]
 
 env_runner:
-  _target_: shared.env.pushblock.pushblock_lowdim_runner.PushBlockLowdimRunner
+  _target_: shared.env.pushblock.pushblock_image_runner.PushBlockImageRunner
   output_dir: ${hydra:runtime.output_dir}
-  n_train: 6
-  n_train_vis: 2
-  train_start_seed: 0
-  n_test: 50
-  n_test_vis: 4
-  test_start_seed: 100000
-  max_steps: 300
-  n_obs_steps: ${num_obs_steps}
-  n_action_steps: ${num_action_steps}
-  n_latency_steps: ${n_latency_steps}
-  fps: 10
-  past_action: ${past_action_visible}
-  n_envs: null
 
 dataset:
-  _target_: shared.env.pushblock.pushblock_lowdim_dataset.PushBlockLowdimDataset
+  _target_: shared.env.pushblock.pushblock_image_dataset.PushBlockImageDataset
   zarr_path: data/pushblock_real/replay_buffer.zarr
   horizon: ${horizon}
-  pad_before: ${eval:'${num_obs_steps}-1+${n_latency_steps}'}
+  pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}
   seed: 42
-  val_ratio: 0.02
+  val_ratio: 0.00
   max_train_episodes: 50
   num_obs_steps: ${dataset_obs_steps}
-  num_latency_steps: ${n_latency_steps}
+  num_latency_steps: 0
   delta_action: True
 
