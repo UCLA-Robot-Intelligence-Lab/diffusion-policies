@@ -1,6 +1,5 @@
 name: real_pushblock_lowdim
 
-# In low-dimensional version, we only have robot pose and action data
 shape_meta: &shape_meta
   obs:
     robot_eef_pose:
@@ -14,8 +13,9 @@ env_runner:
   output_dir: ${hydra:runtime.output_dir}
 
 dataset:
-  _target_: shared.env.pushblock.pushblock_image_dataset.PushBlockImageDataset
-  zarr_path: data/pushblock_real/replay_buffer.zarr
+  _target_: shared.env.pushblock.pushblock_lowdim_dataset.PushBlockLowdimDataset
+  dataset_path: data/pushblock_real
+  shape_meta: *shape_meta
   horizon: ${horizon}
   pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}

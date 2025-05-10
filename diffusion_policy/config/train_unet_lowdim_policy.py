@@ -47,7 +47,6 @@ class TrainDiffusionUnetLowdimWorkspace:
         self._output_dir = output_dir
         self._saving_thread = None
 
-        # Set seed
         seed = cfg.training.seed
         torch.manual_seed(seed)
         np.random.seed(seed)

@@ -8,15 +8,16 @@ _target_: diffusion_policy.unet.train_unet_lowdim_policy.TrainDiffusionUnetLowdi
 device: "cuda:0"
 
 task_name: ${tasks.name}
-obs_dim: 6  # robot_eef_pose dimension
-action_dim: 7  # action dimension
 exp_name: "default"
+
+obs_dim: 6  # robot_eef_pose dimension [6]
+action_dim: 6  # We're using 6D actions (resized from 7D)
 
 horizon: 16
 num_obs_steps: 2
 num_action_steps: 8
 num_inference_steps: 100
-n_latency_steps: 0
+num_latency_steps: 0
 dataset_obs_steps: ${num_obs_steps}
 past_action_visible: False
 obs_as_global_cond: True
@@ -49,8 +50,8 @@ policy:
   horizon: ${horizon}
   obs_dim: ${obs_dim}
   action_dim: ${action_dim}
-  n_action_steps: ${num_action_steps}
-  n_obs_steps: ${num_obs_steps}
+  num_action_steps: ${eval:'${num_action_steps}+${num_latency_steps}'}
+  num_obs_steps: ${num_obs_steps}
   num_inference_steps: ${num_inference_steps}
   obs_as_local_cond: False
   obs_as_global_cond: ${obs_as_global_cond}
@@ -89,7 +90,7 @@ training:
   device: ${device}
   seed: 42
   debug: False
-  resume: True
+  resume: False
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 500
@@ -99,7 +100,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 50
-  checkpoint_every: 1
+  checkpoint_every: 50
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -120,7 +121,7 @@ logging:
 checkpoint:
   topk:
     monitor_key: train_loss
-    mode: max
+    mode: min
     k: 5
     format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
   save_last_ckpt: True

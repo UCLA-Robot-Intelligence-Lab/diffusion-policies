@@ -16,6 +16,7 @@ from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
 from shared.utils.normalize_util import get_image_range_normalizer
 
 class PushBlockImageDataset(Dataset):
+    """
     def __init__(
         self,
         zarr_path,
@@ -29,21 +30,6 @@ class PushBlockImageDataset(Dataset):
         num_latency_steps=0,
         delta_action=False,
     ):
-        """
-        Dataset for real robot pushblock image data.
-        
-        Args:
-            zarr_path: Path to zarr data
-            horizon: Sequence length
-            pad_before: Padding before sequence
-            pad_after: Padding after sequence
-            seed: Random seed
-            val_ratio: Validation ratio
-            max_train_episodes: Maximum training episodes
-            num_obs_steps: Number of observation steps (when not None, only use first num_obs_steps)
-            num_latency_steps: Number of latency steps
-            delta_action: Whether to use delta actions
-        """
         super().__init__()
         
         # First load low-dimensional data
@@ -254,6 +240,7 @@ class PushBlockImageDataset(Dataset):
             }
         
         return torch_data
+        """
 
 def test():
     import os

@@ -31,8 +31,8 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         horizon: int,
         obs_dim: int,
         action_dim: int,
-        n_action_steps: int,
-        n_obs_steps: int,
+        num_action_steps: int,
+        num_obs_steps: int,
         num_inference_steps: int = None,
         obs_as_local_cond: bool = False,
         obs_as_global_cond: bool = True,
@@ -46,8 +46,8 @@ class DiffusionUnetLowdimPolicy(nn.Module):
             horizon : Length of planning/prediction horizon
             obs_dim : Dimension of observations
             action_dim : Dimension of actions
-            n_action_steps : Number of action steps to predict
-            n_obs_steps : Number of observation steps to condition on
+            num_action_steps : Number of action steps to predict
+            num_obs_steps : Number of observation steps to condition on
             num_inference_steps : Number of denoising steps during inference
             obs_as_local_cond : Whether to use observations as local conditioning
             obs_as_global_cond : Whether to use observations as global conditioning
@@ -65,7 +65,7 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         self.mask_generator = LowdimMaskGenerator(
             action_dim_Fa=action_dim,
             obs_feat_dim_Fo=0 if (obs_as_local_cond or obs_as_global_cond) else obs_dim,
-            max_num_obs_steps=n_obs_steps,
+            max_num_obs_steps=num_obs_steps,
             fix_obs_steps=True,
             action_visible=False
         )
@@ -74,8 +74,8 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         self.horizon = horizon
         self.obs_dim = obs_dim
         self.action_dim = action_dim
-        self.n_action_steps = n_action_steps
-        self.n_obs_steps = n_obs_steps
+        self.num_action_steps = num_action_steps
+        self.num_obs_steps = num_obs_steps
         self.obs_as_local_cond = obs_as_local_cond
         self.obs_as_global_cond = obs_as_global_cond
         self.pred_action_steps_only = pred_action_steps_only
@@ -220,7 +220,7 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         
         # Get observation shape
         B, _, Fo = nobs['obs']['robot_eef_pose'].shape
-        To = self.n_obs_steps
+        To = self.num_obs_steps
         T = self.horizon
         Fa = self.action_dim
         
@@ -240,7 +240,7 @@ class DiffusionUnetLowdimPolicy(nn.Module):
             
             # Size depends on whether we predict full trajectory or just action steps
             if self.pred_action_steps_only:
-                shape = (B, self.n_action_steps, Fa)
+                shape = (B, self.num_action_steps, Fa)
             else:
                 shape = (B, T, Fa)
                 
@@ -275,7 +275,7 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         else:
             # By default, we take actions starting after observation horizon
             start = To
-            end = start + self.n_action_steps
+            end = start + self.num_action_steps
             action = action_pred[:, start:end]
         
         result = {
@@ -326,17 +326,17 @@ class DiffusionUnetLowdimPolicy(nn.Module):
             # Use observations as local conditioning
             local_cond = obs['robot_eef_pose']
             # Zero out observations after first n_obs_steps
-            local_cond[:, self.n_obs_steps:] = 0
+            local_cond[:, self.num_obs_steps:] = 0
         elif self.obs_as_global_cond:
             # Use observations as global conditioning
-            global_cond = obs['robot_eef_pose'][:, :self.n_obs_steps].reshape(obs['robot_eef_pose'].shape[0], -1)
+            global_cond = obs['robot_eef_pose'][:, :self.num_obs_steps].reshape(obs['robot_eef_pose'].shape[0], -1)
             print(f"Global cond shape: {global_cond.shape}")
             
             # Use only relevant action steps if specified
             if self.pred_action_steps_only:
-                To = self.n_obs_steps
+                To = self.num_obs_steps
                 start = To
-                end = start + self.n_action_steps
+                end = start + self.num_action_steps
                 trajectory = action[:, start:end]
         else:
             # Inpainting approach - concatenate actions and observations
