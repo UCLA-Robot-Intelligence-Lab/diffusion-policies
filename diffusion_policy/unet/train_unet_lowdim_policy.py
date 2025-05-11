@@ -63,6 +63,14 @@ class TrainDiffusionUnetLowdimWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
+        # Debug print for device settings
+        print(f"Config device setting: {cfg.device}")
+        print(f"Config training.device setting: {cfg.training.device}")
+        print(f"Available CUDA devices: {torch.cuda.device_count()}")
+        print(f"Current CUDA device: {torch.cuda.current_device()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"CUDA device {i}: {torch.cuda.get_device_name(i)}, Free memory: {torch.cuda.get_device_properties(i).total_memory / (1024**3):.2f} GB")
+
         # Debug print
         print(f"Creating model with: obs_dim={cfg.obs_dim}, action_dim={cfg.action_dim}, num_obs_steps={cfg.num_obs_steps}")
         print(f"Expected global cond dim: {cfg.obs_dim * cfg.num_obs_steps}, cond_dim_G in config: {cfg.policy.model.cond_dim_G}")
@@ -153,6 +161,7 @@ class TrainDiffusionUnetLowdimWorkspace:
 
         # Device setup
         device = torch.device(cfg.training.device)
+        
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
@@ -419,6 +428,11 @@ class TrainDiffusionUnetLowdimWorkspace:
     config_name="train_unet_lowdim_real_policy",
 )
 def main(cfg):
+    # Print loaded config info before creating workspace
+    print(f"Loaded config:")
+    print(f"Config device setting: {cfg.device}")
+    print(f"Config training.device setting: {cfg.training.device}")
+    
     workspace = TrainDiffusionUnetLowdimWorkspace(cfg)
     workspace.run()
 

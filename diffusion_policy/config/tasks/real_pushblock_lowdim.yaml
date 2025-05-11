@@ -14,7 +14,7 @@ env_runner:
 
 dataset:
   _target_: shared.env.pushblock.pushblock_lowdim_dataset.PushBlockLowdimDataset
-  dataset_path: data/pushblock_real
+  dataset_path: data/pushblock_real_small
   shape_meta: *shape_meta
   horizon: ${horizon}
   pad_before: ${eval:'${num_obs_steps}-1'}

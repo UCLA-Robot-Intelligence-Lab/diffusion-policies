@@ -5,7 +5,7 @@ import einops
 from typing import Dict, Optional, Tuple
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
-from shared.models.common.normalizer import LinearNormalizer, NestedDictNormalizer
+from shared.models.common.normalizer import LinearNormalizer
 from shared.models.unet.conditional_unet1d import ConditionalUnet1D
 from shared.models.common.mask_generator import LowdimMaskGenerator
 
@@ -70,7 +70,7 @@ class DiffusionUnetLowdimPolicy(nn.Module):
             action_visible=False
         )
         
-        self.normalizer = NestedDictNormalizer()
+        self.normalizer = LinearNormalizer()
         self.horizon = horizon
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -162,135 +162,82 @@ class DiffusionUnetLowdimPolicy(nn.Module):
         
         return trajectory
 
-    def predict_action(
-        self, obs_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
-        args:
-            obs_dict : Dictionary with 'obs' field containing observations
-                       Expected shape: { 'obs': { 'robot_eef_pose': [B, To, Fo] } }
-        returns:
-            result : Dictionary with action predictions
-                     Contains 'action' and 'action_pred' keys
+        obs_dict: must include "obs" key
+        result: must include "action" key
         """
-        normalizer = self.normalizer
+        assert 'obs' in obs_dict
+        assert 'robot_eef_pose' in obs_dict['obs']
+
+        # Extract and normalize the robot_eef_pose directly
+        nobs = self.normalizer['robot_eef_pose'].normalize(obs_dict['obs']['robot_eef_pose'])
+        B, _, Do = nobs.shape
+        To = self.num_obs_steps
+        assert Do == self.obs_dim
+        T = self.horizon
+        Da = self.action_dim
+
+        # build input
         device = self.device
         dtype = self.dtype
-        
-        assert 'obs' in obs_dict
-        assert 'robot_eef_pose' in obs_dict['obs'], "Expected 'robot_eef_pose' in observations"
-        
-        # Normalize observations directly with the nested normalizer
-        try:
-            # Ensure robot_eef_pose has the correct shape [B, T, D]
-            if obs_dict['obs']['robot_eef_pose'].ndim != 3:
-                obs_shape = obs_dict['obs']['robot_eef_pose'].shape
-                # Try to reshape to the expected format
-                B = obs_shape[0]  # Batch dimension
-                if obs_shape[-1] == 6:
-                    # If the last dimension is already 6, just need to ensure 3D tensor
-                    obs_dict['obs']['robot_eef_pose'] = obs_dict['obs']['robot_eef_pose'].reshape(B, -1, 6)
-                else:
-                    # Try to reshape and ensure 6 dimensions
-                    total_elements = obs_dict['obs']['robot_eef_pose'].numel()
-                    if total_elements % 6 == 0:
-                        # Can reshape to have 6 feature dimensions
-                        new_shape = (B, total_elements//(B*6), 6)
-                        obs_dict['obs']['robot_eef_pose'] = obs_dict['obs']['robot_eef_pose'].reshape(new_shape)
-                    else:
-                        # Pad with zeros to reach 6 dimensions
-                        current_feat_dim = obs_dict['obs']['robot_eef_pose'].shape[-1]
-                        if current_feat_dim < 6:
-                            pad_size = 6 - current_feat_dim
-                            # Reshape to [B, T, D]
-                            reshaped = obs_dict['obs']['robot_eef_pose'].reshape(B, -1, current_feat_dim)
-                            # Pad to [B, T, 6]
-                            padded = torch.cat([
-                                reshaped, 
-                                torch.zeros(*reshaped.shape[:-1], pad_size, device=device, dtype=dtype)
-                            ], dim=-1)
-                            obs_dict['obs']['robot_eef_pose'] = padded
-            
-            print(f"After reshaping: {obs_dict['obs']['robot_eef_pose'].shape}")
-            nobs = normalizer.normalize(obs_dict)
-        except Exception as e:
-            print(f"Error in normalization: {e}")
-            # Fallback: skip normalization
-            nobs = {'obs': {'robot_eef_pose': obs_dict['obs']['robot_eef_pose']}}
-        
-        # Get observation shape
-        B, _, Fo = nobs['obs']['robot_eef_pose'].shape
-        To = self.num_obs_steps
-        T = self.horizon
-        Fa = self.action_dim
-        
-        # Prepare conditions for different conditioning types
+
+        # handle different ways of passing observation
         local_cond = None
         global_cond = None
-        
         if self.obs_as_local_cond:
-            # Local temporal conditioning
-            local_cond = torch.zeros(size=(B, T, Fo), device=device, dtype=dtype)
-            local_cond[:, :To] = nobs['obs']['robot_eef_pose'][:, :To]
-            cond_data = torch.zeros(size=(B, T, Fa), device=device, dtype=dtype)
+            # condition through local feature
+            local_cond = torch.zeros(size=(B,T,Do), device=device, dtype=dtype)
+            local_cond[:,:To] = nobs[:,:To]
+            shape = (B, T, Da)
+            cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
         elif self.obs_as_global_cond:
-            # Global conditioning: reshape observations to a single vector
-            global_cond = nobs['obs']['robot_eef_pose'][:, :To].reshape(B, -1)
-            
-            # Size depends on whether we predict full trajectory or just action steps
+            # condition through global feature
+            global_cond = nobs[:,:To].reshape(nobs.shape[0], -1)
+            shape = (B, T, Da)
             if self.pred_action_steps_only:
-                shape = (B, self.num_action_steps, Fa)
-            else:
-                shape = (B, T, Fa)
-                
+                shape = (B, self.num_action_steps, Da)
             cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
         else:
-            # Inpainting approach
-            shape = (B, T, Fa + Fo)
+            # condition through impainting
+            shape = (B, T, Da+Do)
             cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
-            
-            # Set known observation features in condition data
-            cond_data[:, :To, Fa:] = nobs['obs']['robot_eef_pose'][:, :To]
-            cond_mask[:, :To, Fa:] = True
-        
-        # Run diffusion sampling
+            cond_data[:,:To,Da:] = nobs[:,:To]
+            cond_mask[:,:To,Da:] = True
+
+        # run sampling
         nsample = self.conditional_sample(
-            cond_data,
+            cond_data, 
             cond_mask,
             local_cond=local_cond,
             global_cond=global_cond,
-            **self.kwargs
-        )
+            **self.kwargs)
         
-        # Extract and unnormalize action predictions
-        naction_pred = nsample[..., :Fa]
-        action_pred = normalizer['action'].unnormalize(naction_pred)
-        
-        # Output the requested action steps
+        # unnormalize prediction
+        naction_pred = nsample[...,:Da]
+        action_pred = self.normalizer['action'].unnormalize(naction_pred)
+
+        # get action
         if self.pred_action_steps_only:
             action = action_pred
         else:
-            # By default, we take actions starting after observation horizon
             start = To
             end = start + self.num_action_steps
-            action = action_pred[:, start:end]
+            action = action_pred[:,start:end]
         
         result = {
             'action': action,
             'action_pred': action_pred
         }
-        
-        # For inpainting approach, also return predicted observations
         if not (self.obs_as_local_cond or self.obs_as_global_cond):
-            nobs_pred = nsample[..., Fa:]
-            obs_pred = normalizer['obs'].unnormalize({'robot_eef_pose': nobs_pred})
-            action_obs_pred = obs_pred['robot_eef_pose'][:, start:end]
+            nobs_pred = nsample[...,Da:]
+            obs_pred = self.normalizer['robot_eef_pose'].unnormalize(nobs_pred)
+            action_obs_pred = obs_pred[:,start:end]
             result['action_obs_pred'] = action_obs_pred
             result['obs_pred'] = obs_pred
-            
         return result
 
     # ========= TRAINING =========
@@ -301,95 +248,75 @@ class DiffusionUnetLowdimPolicy(nn.Module):
     def compute_loss(self, batch):
         """
         Compute diffusion loss for training
-        
-        args:
-            batch: Dictionary with observations and actions
-                  {'obs': {'robot_eef_pose': [B, T, Fo]}, 'action': [B, T, Fa]}
-        returns:
-            loss: Scalar loss tensor
         """
-        # Normalize input data
-        nbatch = self.normalizer.normalize(batch)
-        obs = nbatch['obs']
-        action = nbatch['action']
-        
-        # Debug: print shapes
-        print(f"Observation shape: {obs['robot_eef_pose'].shape}")
-        print(f"Action shape: {action.shape}")
-        
-        # Prepare conditions based on conditioning method
+        # normalize input
+        assert 'obs' in batch
+        assert 'action' in batch
+        assert 'robot_eef_pose' in batch['obs']
+
+        # Normalize obs and action separately
+        nobs = self.normalizer['robot_eef_pose'].normalize(batch['obs']['robot_eef_pose'])
+        naction = self.normalizer['action'].normalize(batch['action'])
+
+        # handle different ways of passing observation
         local_cond = None
         global_cond = None
-        trajectory = action  # Default target is actions only
-        
+        trajectory = naction
         if self.obs_as_local_cond:
-            # Use observations as local conditioning
-            local_cond = obs['robot_eef_pose']
-            # Zero out observations after first n_obs_steps
-            local_cond[:, self.num_obs_steps:] = 0
+            # zero out observations after n_obs_steps
+            local_cond = nobs
+            local_cond[:,self.num_obs_steps:,:] = 0
         elif self.obs_as_global_cond:
             # Use observations as global conditioning
-            global_cond = obs['robot_eef_pose'][:, :self.num_obs_steps].reshape(obs['robot_eef_pose'].shape[0], -1)
-            print(f"Global cond shape: {global_cond.shape}")
-            
-            # Use only relevant action steps if specified
+            global_cond = nobs[:,:self.num_obs_steps,:].reshape(nobs.shape[0], -1)
             if self.pred_action_steps_only:
                 To = self.num_obs_steps
                 start = To
                 end = start + self.num_action_steps
-                trajectory = action[:, start:end]
+                trajectory = naction[:,start:end]
         else:
             # Inpainting approach - concatenate actions and observations
-            trajectory = torch.cat([action, obs['robot_eef_pose']], dim=-1)
-        
-        # Generate conditioning mask
+            trajectory = torch.cat([naction, nobs], dim=-1)
+
+        # generate impainting mask
         if self.pred_action_steps_only:
             condition_mask = torch.zeros_like(trajectory, dtype=torch.bool)
         else:
             condition_mask = self.mask_generator(trajectory.shape)
-        
-        # Add noise to the trajectory (forward diffusion)
+
+        # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
         bsz = trajectory.shape[0]
-        
-        # Sample random timesteps for each batch element
+        # Sample a random timestep for each image
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps,
+            0, self.noise_scheduler.config.num_train_timesteps, 
             (bsz,), device=trajectory.device
         ).long()
-        
-        # Forward diffusion: add noise to clean trajectory
+        # Add noise to the clean images according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
         noisy_trajectory = self.noise_scheduler.add_noise(
-            trajectory, noise, timesteps
-        )
+            trajectory, noise, timesteps)
         
-        # Calculate loss mask (loss is computed where mask is False)
+        # compute loss mask
         loss_mask = ~condition_mask
-        
-        # Apply conditioning by overwriting noisy values where condition is True
+
+        # apply conditioning
         noisy_trajectory[condition_mask] = trajectory[condition_mask]
         
-        # Predict denoised trajectory
-        pred = self.model(
-            noisy_trajectory,
-            timesteps,
-            cond_BTL=local_cond,
-            cond_BG=global_cond
-        )
-        
-        # Determine target based on scheduler configuration
-        pred_type = self.noise_scheduler.config.prediction_type
+        # Predict the noise residual
+        pred = self.model(noisy_trajectory, timesteps, 
+            cond_BTL=local_cond, cond_BG=global_cond)
+
+        pred_type = self.noise_scheduler.config.prediction_type 
         if pred_type == 'epsilon':
             target = noise
         elif pred_type == 'sample':
             target = trajectory
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
-        
-        # Compute MSE loss masked by loss_mask
+
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * loss_mask.type(loss.dtype)
         loss = einops.reduce(loss, 'b ... -> b (...)', 'mean')
         loss = loss.mean()
-        
         return loss 

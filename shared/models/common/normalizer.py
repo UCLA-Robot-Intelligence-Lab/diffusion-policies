@@ -3,6 +3,7 @@ import zarr
 import numpy as np
 import torch
 import torch.nn as nn
+import logging
 
 from typing import Union, Dict
 from shared.utils.pytorch_util import dict_apply
@@ -702,60 +703,3 @@ def test():
 
 if __name__ == "__main__":
     test()
-
-
-class NestedDictNormalizer(LinearNormalizer):
-    """Extends LinearNormalizer to handle nested dictionaries."""
-    
-    @torch.no_grad()
-    def fit(self, data: Dict, last_n_dims=1, mode="limits", **kwargs):
-        """
-        Fit normalizer parameters for nested dictionaries
-        """
-        if not isinstance(data, dict):
-            return super().fit(data, last_n_dims=last_n_dims, mode=mode, **kwargs)
-        
-        for key, value in data.items():
-            if isinstance(value, dict):
-                # Handle nested dictionary
-                nested_normalizer = NestedDictNormalizer()
-                nested_normalizer.fit(value, last_n_dims=last_n_dims, mode=mode, **kwargs)
-                self.params_dict[key] = nested_normalizer.params_dict
-            else:
-                # Handle tensor/array data
-                temp_normalizer = LinearNormalizer()
-                temp_normalizer.fit({key: value}, last_n_dims=last_n_dims, mode=mode, **kwargs)
-                self.params_dict[key] = temp_normalizer.params_dict[key]
-        return self
-    
-    def _normalize_impl(self, x, forward=True):
-        """Override to handle nested dictionaries recursively"""
-        if not isinstance(x, dict):
-            return super()._normalize_impl(x, forward)
-            
-        result = {}
-        for key, value in x.items():
-            print(f"Normalizing key: {key}, value type: {type(value)}")
-            if isinstance(value, dict):
-                print(f"Dict keys: {value.keys()}")
-            elif hasattr(value, 'shape'):
-                print(f"Shape: {value.shape}")
-                
-            if key in self.params_dict:
-                if isinstance(value, dict):
-                    # Create a temporary normalizer with the nested parameters
-                    temp_norm = NestedDictNormalizer()
-                    temp_norm.params_dict = self.params_dict[key]
-                    result[key] = temp_norm._normalize_impl(value, forward)
-                else:
-                    try:
-                        # Regular normalization
-                        result[key] = _normalize(value, self.params_dict[key], forward)
-                    except Exception as e:
-                        print(f"Error normalizing key {key} with shape {value.shape if hasattr(value, 'shape') else 'unknown'}")
-                        print(f"Params keys: {self.params_dict[key].keys()}")
-                        raise e
-            else:
-                # Key not found, pass through
-                result[key] = value
-        return result
