@@ -146,10 +146,9 @@ class PushBlockImageDataset(Dataset):
     def get_normalizer(self, **kwargs) -> LinearNormalizer:
         normalizer = LinearNormalizer()
 
-        # Get the first 6 dimensions of the action data (ignore grasp)
-        actions = self.replay_buffer['action'][:, :6]
-        normalizer['action'] = SingleFieldLinearNormalizer.create_fit(actions)
-        
+        normalizer['action'] = SingleFieldLinearNormalizer.create_fit(
+            self.replay_buffer['action']
+        )
         for key in self.lowdim_keys:
             normalizer[key] = SingleFieldLinearNormalizer.create_fit(
                 self.replay_buffer[key]
@@ -182,9 +181,6 @@ class PushBlockImageDataset(Dataset):
         action = data['action'].astype(np.float32)
         if self.num_latency_steps > 0:
             action = action[self.num_latency_steps:]
-        
-        # Only use the first 6 dimensions of the action (ignore grasp)
-        action = action[..., :6]
 
         torch_data = {
             "obs": dict_apply(obs_dict, torch.from_numpy),
@@ -213,13 +209,11 @@ def _get_replay_buffer(dataset_path, shape_meta, store):
         if type == 'rgb':
             rgb_keys.append(key)
             c, h, w = shape
-            out_resolutions[key] = (w, h)
-            # print(f"RGB key {key} has resolution {out_resolutions[key]}")
+            out_resolutions.append((w, h))
         elif type == 'low_dim':
             lowdim_keys.append(key)
             lowdim_shapes[key] = tuple(shape)
             if 'pose' in key:
-                print(f"Pose key {key} has shape {shape}")
                 assert shape[0] == 6, f"Pose key {key} must have 6 elements"
         else:
             raise ValueError(f"Unknown shape type: {type}")
@@ -236,18 +230,10 @@ def _get_replay_buffer(dataset_path, shape_meta, store):
             lowdim_keys=lowdim_keys + ['action'],
             image_keys=rgb_keys,
         )
-    
-    print(f"Initial action shape in replay buffer: {replay_buffer['action'].shape}")
+
     if action_shape == (7,):
         zarr_arr = replay_buffer['action']
         zarr_resize_index_last_dim(zarr_arr, idxs=[0, 1, 2, 3, 4, 5])
-        print(f"Resized action shape to: {zarr_arr.shape}")
-    elif action_shape == (2,):
-        # Special case for x-y position control
-        zarr_arr = replay_buffer['action']
-        print(f"Raw action shape before resize: {zarr_arr.shape}")
-        zarr_resize_index_last_dim(zarr_arr, idxs=[0, 1])
-        print(f"Resized action shape for x-y: {zarr_arr.shape}")
 
     return replay_buffer
 

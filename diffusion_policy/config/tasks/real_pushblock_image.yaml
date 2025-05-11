@@ -1,6 +1,6 @@
 name: real_pushblock_image
 
-image_shape: &image_shape [3, 240, 240]
+image_shape: &image_shape [3, 240, 320]
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
   obs:
@@ -11,10 +11,10 @@ shape_meta: &shape_meta
       shape: *image_shape
       type: rgb
     robot_eef_pose:
-      shape: [2]
+      shape: [6]
       type: low_dim
   action:
-    shape: [2]
+    shape: [6]
 
 env_runner:
   _target_: shared.env.pushblock.pushblock_image_runner.PushBlockImageRunner
@@ -22,7 +22,8 @@ env_runner:
 
 dataset:
   _target_: shared.env.pushblock.pushblock_image_dataset.PushBlockImageDataset
-  zarr_path: data/pushblock_real/replay_buffer.zarr
+  dataset_path: data/pushblock_real
+  shape_meta: *shape_meta
   horizon: ${horizon}
   pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}
