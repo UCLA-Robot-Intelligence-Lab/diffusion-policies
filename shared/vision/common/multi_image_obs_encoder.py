@@ -31,8 +31,8 @@ class ObsEncoder(nn.Module):
                               network module or a dictionary with loaded weights.
             resize_shape : For images, what to resize (down) the image to.
             crop_shape : Shape of the images after cropping.
-            random-cop : Flag to determine to use the crop_randomizer instead of
-                         default center crop.
+            random-crop : Flag to determine to use the crop_randomizer instead of
+                          default center crop.
             use_group_norm : Flag to determine whether to replace 2D Batch Norm
                              for resnet backbones with Group Norm.
             share_vision_backbone : Flag to determine whether to use the same

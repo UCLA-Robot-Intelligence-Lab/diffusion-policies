@@ -1,0 +1,28 @@
+name: real_pushblock_lowdim
+
+shape_meta: &shape_meta
+  obs:
+    robot_eef_pose:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [7]
+
+env_runner:
+  _target_: shared.env.pushblock.pushblock_image_runner.PushBlockImageRunner
+  output_dir: ${hydra:runtime.output_dir}
+
+dataset:
+  _target_: shared.env.pushblock.pushblock_lowdim_dataset.PushBlockLowdimDataset
+  dataset_path: data/pushblock_real_small
+  shape_meta: *shape_meta
+  horizon: ${horizon}
+  pad_before: ${eval:'${num_obs_steps}-1'}
+  pad_after: ${eval:'${num_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.05
+  max_train_episodes: 50
+  num_obs_steps: ${dataset_obs_steps}
+  num_latency_steps: 0
+  delta_action: True
+

@@ -33,9 +33,7 @@ from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
 
-from diffusion_policy.unet.unet_image_policy import (
-    DiffusionUnetImagePolicy,
-)
+from diffusion_policy.unet.unet_lowdim_policy import DiffusionUnetLowdimPolicy
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
 from shared.utils.pytorch_util import (
@@ -50,7 +48,7 @@ from shared.models.common.lr_scheduler import get_scheduler
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
-class TrainDiffusionUnetImageWorkspace:
+class TrainDiffusionUnetLowdimWorkspace:
     include_keys = ("global_step", "epoch")
     exclude_keys = ()
 
@@ -65,10 +63,22 @@ class TrainDiffusionUnetImageWorkspace:
         np.random.seed(seed)
         random.seed(seed)
 
-        # Configure model
-        self.model: DiffusionUnetImagePolicy = hydra.utils.instantiate(cfg.policy)
+        # Debug print for device settings
+        print(f"Config device setting: {cfg.device}")
+        print(f"Config training.device setting: {cfg.training.device}")
+        print(f"Available CUDA devices: {torch.cuda.device_count()}")
+        print(f"Current CUDA device: {torch.cuda.current_device()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"CUDA device {i}: {torch.cuda.get_device_name(i)}, Free memory: {torch.cuda.get_device_properties(i).total_memory / (1024**3):.2f} GB")
 
-        self.ema_model: Optional[DiffusionUnetImagePolicy] = None
+        # Debug print
+        print(f"Creating model with: obs_dim={cfg.obs_dim}, action_dim={cfg.action_dim}, num_obs_steps={cfg.num_obs_steps}")
+        print(f"Expected global cond dim: {cfg.obs_dim * cfg.num_obs_steps}, cond_dim_G in config: {cfg.policy.model.cond_dim_G}")
+        
+        # Configure model
+        self.model: DiffusionUnetLowdimPolicy = hydra.utils.instantiate(cfg.policy)
+
+        self.ema_model: Optional[DiffusionUnetLowdimPolicy] = None
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
@@ -81,106 +91,12 @@ class TrainDiffusionUnetImageWorkspace:
         self.global_step = 0
         self.epoch = 0
 
-        # Inference step testing
-        self.num_inference_steps_ls = [10, 16, 25, 50, 100]
-        self.coverage_data = {
-            "train": {s: [] for s in self.num_inference_steps_ls},
-            "test": {s: [] for s in self.num_inference_steps_ls},
-        }
-
     @property
     def output_dir(self):
         output_dir = self._output_dir
         if output_dir is None:
             output_dir = HydraConfig.get().runtime.output_dir
         return output_dir
-
-    def update_coverage_plot(self):
-        coverage_fig, coverage_ax = plt.subplots(figsize=(10, 5))
-        coverage_ax.set_title("Coverage vs Num Inference Steps")
-        coverage_ax.set_xlabel("Inference Steps")
-        coverage_ax.set_ylabel("Coverage")
-
-        coverage_avgs_train = []
-        coverage_avgs_test = []
-        coverage_max_train = []
-        coverage_max_test = []
-
-        for s in self.num_inference_steps_ls:
-            train_values = self.coverage_data["train"][s]
-            test_values = self.coverage_data["test"][s]
-
-            if len(train_values) > 0:
-                coverage_avgs_train.append(np.mean(train_values))
-                coverage_max_train.append(np.max(train_values))
-            else:
-                coverage_avgs_train.append(0.0)
-                coverage_max_train.append(0.0)
-
-            if len(test_values) > 0:
-                coverage_avgs_test.append(np.mean(test_values))
-                coverage_max_test.append(np.max(test_values))
-            else:
-                coverage_avgs_test.append(0.0)
-                coverage_max_test.append(0.0)
-
-        x_positions = np.arange(len(self.num_inference_steps_ls))
-        bar_width = 0.2
-
-        # 1) Train Avg
-        coverage_ax.bar(
-            x_positions - 1.5 * bar_width,
-            coverage_avgs_train,
-            bar_width,
-            label="Train Avg",
-            color="C0",
-            alpha=0.7,
-        )
-        # 2) Test Avg
-        coverage_ax.bar(
-            x_positions - 0.5 * bar_width,
-            coverage_avgs_test,
-            bar_width,
-            label="Test Avg",
-            color="C1",
-            alpha=0.7,
-        )
-        # 3) Train Max
-        coverage_ax.bar(
-            x_positions + 0.5 * bar_width,
-            coverage_max_train,
-            bar_width,
-            label="Train Max",
-            color="C2",
-            alpha=0.7,
-        )
-        # 4) Test Max
-        coverage_ax.bar(
-            x_positions + 1.5 * bar_width,
-            coverage_max_test,
-            bar_width,
-            label="Test Max",
-            color="C3",
-            alpha=0.7,
-        )
-
-        coverage_ax.set_xticks(x_positions)
-        coverage_ax.set_xticklabels([str(s) for s in self.num_inference_steps_ls])
-
-        all_values = (
-            coverage_avgs_train
-            + coverage_avgs_test
-            + coverage_max_train
-            + coverage_max_test
-        )
-        if len(all_values) > 0:
-            max_cov = max(all_values)
-            coverage_ax.set_ylim([0, max(max_cov, 1e-6) * 1.1])
-        coverage_ax.legend()
-
-        coverage_fig.tight_layout()
-        wandb.log({"coverage_plot": wandb.Image(coverage_fig)}, step=self.global_step)
-        plt.close(coverage_fig)
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
@@ -227,13 +143,6 @@ class TrainDiffusionUnetImageWorkspace:
         if cfg.training.use_ema:
             ema = hydra.utils.instantiate(cfg.ema, model=self.ema_model)
 
-        """
-        The environment runner handles simulating the environment.
-        """
-        env_runner = hydra.utils.instantiate(
-            cfg.tasks.env_runner, output_dir=self.output_dir
-        )
-
         # Configure logging with Weights & Biases
         wandb_run = wandb.init(
             dir=str(self.output_dir),
@@ -252,6 +161,7 @@ class TrainDiffusionUnetImageWorkspace:
 
         # Device setup
         device = torch.device(cfg.training.device)
+        
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
@@ -276,10 +186,6 @@ class TrainDiffusionUnetImageWorkspace:
             for local_epoch_idx in range(cfg.training.num_epochs):
                 step_log = {}
                 # ========= Train for this epoch ==========
-                if cfg.training.freeze_encoder:
-                    self.model.obs_encoder.eval()
-                    self.model.obs_encoder.requires_grad_(False)
-
                 train_losses = []
                 with tqdm.tqdm(
                     train_dataloader,
@@ -346,37 +252,6 @@ class TrainDiffusionUnetImageWorkspace:
                     policy = self.ema_model
                 policy.eval()
 
-                # Run rollout
-                if (self.epoch % cfg.training.rollout_every) == 0:
-                    runner_log = env_runner.run(policy)
-                    # Log all
-                    step_log.update(runner_log)
-
-                # Coverage logging, track separately for train vs test
-                if cfg.training.get("measure_coverage", False) and (
-                    self.epoch % cfg.training.rollout_every == 0
-                ):
-                    coverage_log_dict = {}
-                    for s in self.num_inference_steps_ls:
-                        with temporary_attribute(policy, "num_inference_steps", s):
-                            runner_log_s = env_runner.run(policy)
-                        for k, v in runner_log_s.items():
-                            if "sim_max_coverage_" in k:
-                                coverage_val = float(v)
-                                if k.startswith("train"):
-                                    self.coverage_data["train"][s].append(coverage_val)
-                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
-                                        coverage_val
-                                    )
-                                elif k.startswith("test"):
-                                    self.coverage_data["test"][s].append(coverage_val)
-                                    coverage_log_dict[f"train_{s}_coverage/{k}"] = (
-                                        coverage_val
-                                    )
-
-                    self.update_coverage_plot()
-                    wandb.log(coverage_log_dict, step=self.global_step)
-
                 # Run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
@@ -411,7 +286,7 @@ class TrainDiffusionUnetImageWorkspace:
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
                         )
-                        obs_dict = batch["obs"]
+                        obs_dict = {'obs': batch['obs']}
                         gt_action = batch["action"]
 
                         t0 = time.time()
@@ -445,10 +320,15 @@ class TrainDiffusionUnetImageWorkspace:
                     # Sanitize metric names
                     metric_dict = {k.replace("/", "_"): v for k, v in step_log.items()}
 
-                    # Manage Top-K checkpoints
-                    topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
-                    if topk_ckpt_path is not None:
-                        self.save_checkpoint(path=topk_ckpt_path)
+                    # Check if the required monitor_key exists in the metrics
+                    # This prevents KeyError when trying to access a missing key
+                    monitor_key = cfg.checkpoint.topk.monitor_key
+                    if monitor_key in metric_dict:
+                        topk_ckpt_path = topk_manager.get_ckpt_path(metric_dict)
+                        if topk_ckpt_path is not None:
+                            self.save_checkpoint(path=topk_ckpt_path)
+                    else:
+                        print(f"Warning: Monitor key '{monitor_key}' not found in metrics. Available keys: {list(metric_dict.keys())}")
 
                 # ========= End of Evaluation ==========
                 policy.train()
@@ -545,12 +425,17 @@ class TrainDiffusionUnetImageWorkspace:
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")),
-    config_name="train_unet_image_real_policy",
+    config_name="train_unet_lowdim_real_policy",
 )
 def main(cfg):
-    workspace = TrainDiffusionUnetImageWorkspace(cfg)
+    # Print loaded config info before creating workspace
+    print(f"Loaded config:")
+    print(f"Config device setting: {cfg.device}")
+    print(f"Config training.device setting: {cfg.training.device}")
+    
+    workspace = TrainDiffusionUnetLowdimWorkspace(cfg)
     workspace.run()
 
 
 if __name__ == "__main__":
-    main()
+    main() 

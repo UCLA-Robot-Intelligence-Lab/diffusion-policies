@@ -1,0 +1,141 @@
+defaults:
+  - _self_
+  - tasks: real_pushblock_lowdim
+
+name: train_diffusion_pushblock_real_lowdim_${num_inference_steps}
+_target_: diffusion_policy.unet.train_unet_lowdim_policy.TrainDiffusionUnetLowdimWorkspace
+
+device: "cuda:1"
+
+task_name: ${tasks.name}
+exp_name: "default"
+
+obs_dim: 6  # robot_eef_pose dimension [6]
+action_dim: 6  # We're using 6D actions (resized from 7D)
+
+horizon: 16
+num_obs_steps: 2
+num_action_steps: 8
+num_inference_steps: 100
+num_latency_steps: 0
+dataset_obs_steps: ${num_obs_steps}
+past_action_visible: False
+obs_as_global_cond: True
+pred_action_steps_only: False
+
+policy:
+  _target_: diffusion_policy.unet.unet_lowdim_policy.DiffusionUnetLowdimPolicy
+
+  model:
+    _target_: shared.models.unet.conditional_unet1d.ConditionalUnet1D
+    inp_dim_F: ${eval:'${action_dim} if ${obs_as_global_cond} else ${obs_dim} + ${action_dim}'}
+    cond_dim_L: null
+    cond_dim_G: ${eval:'${obs_dim} * ${num_obs_steps} if ${obs_as_global_cond} else null'}
+    embed_dim_D: 128
+    down_dims: [256, 512, 1024]
+    kernel_size: 5
+    num_groups: 8
+    film_modulation_scale: True
+
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    variance_type: fixed_small
+    clip_sample: True
+    prediction_type: epsilon
+
+  horizon: ${horizon}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  num_action_steps: ${eval:'${num_action_steps}+${num_latency_steps}'}
+  num_obs_steps: ${num_obs_steps}
+  num_inference_steps: ${num_inference_steps}
+  obs_as_local_cond: False
+  obs_as_global_cond: ${obs_as_global_cond}
+  pred_action_steps_only: ${pred_action_steps_only}
+
+ema:
+  _target_: shared.models.unet.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 256
+  num_workers: 4
+  shuffle: True
+  pin_memory: True
+  persistent_workers: False
+
+val_dataloader:
+  batch_size: 256
+  num_workers: 4
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+training:
+  device: ${device}
+  seed: 42
+  debug: False
+  resume: False
+  # optimization
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 5000
+  gradient_accumulate_every: 1
+  use_ema: True
+  # training loop control
+  # in epochs
+  rollout_every: 50
+  checkpoint_every: 50
+  val_every: 1
+  sample_every: 5
+  # steps per epoch
+  max_train_steps: null
+  max_val_steps: null
+  # misc
+  tqdm_interval_sec: 1.0
+
+logging:
+  project: diffusion_policies
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: train_loss
+    mode: min
+    k: 5
+    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num} 
