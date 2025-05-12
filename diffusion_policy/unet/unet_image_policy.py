@@ -255,9 +255,11 @@ class DiffusionUnetImagePolicy(nn.Module):
         To = self.num_obs_steps
         Fa = self.action_dim_Fa
         Fo = self.obs_feat_dim_Fo
-        B = obs["image"].shape[0]
 
         normalized_obs = normalizer.normalize(obs)
+        value  = next(iter(obs.values()))
+        B, To_cp = value.shape[:2]
+        assert To_cp == To, f"To_cp: {To_cp}, To: {To}"
 
         cond_BTL = None
         cond_BG = None
