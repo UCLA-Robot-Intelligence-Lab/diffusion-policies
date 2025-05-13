@@ -2,11 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
-data/
-output/
+data/*
+output/*
 # Ignore these folders
-checkpoints/
-wandb/
+checkpoints/*
+wandb/*
 shared/visual_encoders/weights/*
 shared/visual_encoders/dataset/*
 shared/visual_encoders/checkpoints/*
