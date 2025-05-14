@@ -21,7 +21,8 @@ from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
 from shared.utils.normalize_util import get_image_range_normalizer
 from shared.real_world.real_data_conversion import real_data_to_replay_buffer
-class PushBlockImageDataset(Dataset):
+
+class PickNPlaceImageDataset(Dataset):
     def __init__(self,
                  shape_meta: dict,
                  dataset_path: str,
@@ -85,7 +86,11 @@ class PushBlockImageDataset(Dataset):
                 if i > 0:
                     start = episode_ends[i-1]
                 end = episode_ends[i]
-                actions[start+1:end] = np.diff(actions[start:end], axis=0)
+                
+                position = actions[start:end, :3]
+                position_diff = np.diff(position, axis=0)
+                actions[start+1:end, :3] = position_diff
+                    
             replay_buffer['action'][:] = actions
 
         rgb_keys = list()
@@ -146,9 +151,10 @@ class PushBlockImageDataset(Dataset):
     def get_normalizer(self, **kwargs) -> LinearNormalizer:
         normalizer = LinearNormalizer()
 
-        normalizer['action'] = SingleFieldLinearNormalizer.create_fit(
-            self.replay_buffer['action']
-        )
+        # Use all 7 dimensions of the action data (including grasp)
+        actions = self.replay_buffer['action'][:]
+        normalizer['action'] = SingleFieldLinearNormalizer.create_fit(actions)
+        
         for key in self.lowdim_keys:
             normalizer[key] = SingleFieldLinearNormalizer.create_fit(
                 self.replay_buffer[key]
@@ -181,7 +187,8 @@ class PushBlockImageDataset(Dataset):
         action = data['action'].astype(np.float32)
         if self.num_latency_steps > 0:
             action = action[self.num_latency_steps:]
-
+        
+        # Use all action dimensions including grasp
         torch_data = {
             "obs": dict_apply(obs_dict, torch.from_numpy),
             "action": torch.from_numpy(action)
@@ -209,18 +216,21 @@ def _get_replay_buffer(dataset_path, shape_meta, store):
         if type == 'rgb':
             rgb_keys.append(key)
             c, h, w = shape
-            out_resolutions.append((w, h))
+            out_resolutions[key] = (w, h)
+            # print(f"RGB key {key} has resolution {out_resolutions[key]}")
         elif type == 'low_dim':
             lowdim_keys.append(key)
             lowdim_shapes[key] = tuple(shape)
             if 'pose' in key:
+                print(f"Pose key {key} has shape {shape}")
                 assert shape[0] == 6, f"Pose key {key} must have 6 elements"
         else:
             raise ValueError(f"Unknown shape type: {type}")
             
     action_shape = tuple(shape_meta['action']['shape'])
-    # Should we be checking against 6 or 7 actions, maybe 
-    # Make 6 since we don't need grasp.
+    # Make sure we have 7 actions (including grasp)
+    assert action_shape[0] == 7, f"Action shape must be 7, got {action_shape[0]}"
+    
     cv2.setNumThreads(1)
     with threadpool_limits(1):
         replay_buffer = real_data_to_replay_buffer(
@@ -230,10 +240,10 @@ def _get_replay_buffer(dataset_path, shape_meta, store):
             lowdim_keys=lowdim_keys + ['action'],
             image_keys=rgb_keys,
         )
-
-    if action_shape == (7,):
-        zarr_arr = replay_buffer['action']
-        zarr_resize_index_last_dim(zarr_arr, idxs=[0, 1, 2, 3, 4, 5])
+    
+    print(f"Initial action shape in replay buffer: {replay_buffer['action'].shape}")
+    zarr_arr = replay_buffer['action']
+    print(f"Raw action shape: {zarr_arr.shape}")
 
     return replay_buffer
 
