@@ -8,9 +8,9 @@ import numcodecs
 import multiprocessing
 import concurrent.futures
 from tqdm import tqdm
-from shared.real_world.replay_buffer import ReplayBuffer, get_optimal_chunks
-from shared.real_world.cv2_util import get_image_transform
-from shared.real_world.video_recorder import read_video
+from shared.real_world.record_utils.replay_buffer import ReplayBuffer, get_optimal_chunks
+from shared.real_world.record_utils.cv2_util import get_image_transform
+from shared.real_world.record_utils.video_recorder import read_video
 from shared.utils.imagecodecs_numcodecs import (
     register_codecs,
     Jpeg2k

@@ -2,7 +2,7 @@ import numpy as np
 import av
 
 from typing import Optional, Callable, Generator
-from shared.real_world.timestamp_accumulator import get_accumulate_timestamp_idxs
+from shared.real_world.record_utils.timestamp_accumulator import get_accumulate_timestamp_idxs
 
 
 def read_video(
