@@ -3,7 +3,6 @@ import time
 import numpy as np
 
 from typing import Dict, List, Union
-from queue import Empty
 from multiprocessing.managers import SharedMemoryManager
 from shared.utils.shared_memory.shared_ndarray import SharedNDArray
 from shared.utils.shared_memory.shared_memory_util import ArraySpec, SharedAtomicCounter

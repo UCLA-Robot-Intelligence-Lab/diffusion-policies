@@ -103,7 +103,7 @@ def test():
     zarr_path = os.path.expanduser(
         "~/dev/diffusion_policy/data/pusht/pusht_cchi_v7_replay.zarr"
     )
-    dataset = PushTImageDataset(zarr_path, horizon=16)
+    PushTImageDataset(zarr_path, horizon=16)
 
     # from matplotlib import pyplot as plt
     # normalizer = dataset.get_normalizer()

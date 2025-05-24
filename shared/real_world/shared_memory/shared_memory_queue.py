@@ -4,7 +4,10 @@ import numpy as np
 from typing import Dict, List, Union
 from queue import Empty, Full
 from multiprocessing.managers import SharedMemoryManager
-from shared.real_world.shared_memory.shared_memory_util import ArraySpec, SharedAtomicCounter
+from shared.real_world.shared_memory.shared_memory_util import (
+    ArraySpec,
+    SharedAtomicCounter,
+)
 from shared.real_world.shared_memory.shared_ndarray import SharedNDArray
 
 

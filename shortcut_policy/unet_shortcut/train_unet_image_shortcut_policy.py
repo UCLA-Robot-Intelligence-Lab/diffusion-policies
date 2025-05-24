@@ -28,11 +28,9 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
 from hydra.core.hydra_config import HydraConfig
-from hydra import initialize, compose
 from omegaconf import OmegaConf
-from typing import Optional, Dict, List
+from typing import Optional, List
 from torch.utils.data import DataLoader
-from collections import defaultdict
 
 from shortcut_policy.unet_shortcut.unet_image_shortcut_policy import (
     UnetImageShortcutPolicy,

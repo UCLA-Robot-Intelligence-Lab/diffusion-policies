@@ -1,4 +1,3 @@
-import copy
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
 
@@ -64,7 +63,6 @@ class EMAModel:
         #     if data_ptr != 0:
         #         old_all_dataptrs.add(data_ptr)
 
-        all_dataptrs = set()
         for module, ema_module in zip(
             new_model.modules(), self.averaged_model.modules()
         ):

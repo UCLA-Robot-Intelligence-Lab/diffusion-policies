@@ -5,17 +5,14 @@ import zarr
 import os
 import shutil
 import copy
-import json
-import hashlib
 import concurrent.futures
 import multiprocessing
 
 from filelock import FileLock
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
-from typing import Dict, List
+from typing import Dict
 from torch.utils.data import Dataset
-from omegaconf import OmegaConf
 
 from shared.utils.pytorch_util import dict_apply
 from shared.models.common.normalizer import (
@@ -27,7 +24,6 @@ from shared.utils.imagecodecs_numcodecs import register_codecs, Jpeg2k
 from shared.env.robomimic.replay_buffer import ReplayBuffer
 from shared.env.robomimic.sampler import SequenceSampler, get_val_mask
 from shared.utils.normalize_util import (
-    robomimic_abs_action_normalizer_from_stat,
     robomimic_abs_action_only_dual_arm_normalizer_from_stat,
     get_range_normalizer_from_stat,
     get_image_range_normalizer,
@@ -344,7 +340,7 @@ def _convert_robomimic_to_replay(
                 # make sure we can successfully decode
                 _ = zarr_arr[zarr_idx]
                 return True
-            except Exception as e:
+            except Exception:
                 return False
 
         with tqdm(

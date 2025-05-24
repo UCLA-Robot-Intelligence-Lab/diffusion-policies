@@ -6,7 +6,11 @@ import shutil
 import pathlib
 
 from multiprocessing.managers import SharedMemoryManager
-from shared.real_world.control.xarm_controller import XArmConfig, XArmController, XArmInterpolationController
+from shared.real_world.control.xarm_controller import (
+    XArmConfig,
+    XArmController,
+    XArmInterpolationController,
+)
 from shared.real_world.record_utils.replay_buffer import ReplayBuffer
 from shared.real_world.realsense.single_realsense import SingleRealsense
 from shared.real_world.record_utils.cv2_util import get_image_transform
@@ -16,7 +20,7 @@ from shared.real_world.record_utils.timestamp_accumulator import (
     TimestampActionAccumulator,
     TimestampObsAccumulator,
 )
-from typing import Tuple, List, Optional, Dict, Union, Type
+from typing import Tuple, List, Optional, Dict, Union
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,7 +87,9 @@ class RealEnv:
         use_interpolation: bool = False,
         max_pos_speed: float = 0.25,
         max_rot_speed: float = 0.6,
-        xarm_controller: Optional[Union[XArmController, XArmInterpolationController]] = None,
+        xarm_controller: Optional[
+            Union[XArmController, XArmInterpolationController]
+        ] = None,
     ):
         logger.info("[RealEnv] Initializing environment.")
 
@@ -123,14 +129,12 @@ class RealEnv:
             output_res=obs_image_resolution,
             bgr_to_rgb=True,
         )
-        color_transform = color_tf
 
         if obs_float32:
 
             def float_transform(img):
                 return color_tf(img).astype(np.float32) / 255.0
 
-            color_transform = float_transform
 
         def transform(data):
             if "color" in data:
@@ -184,7 +188,9 @@ class RealEnv:
                 max_pos_speed=max_pos_speed,
                 max_rot_speed=max_rot_speed,
             )
-            logger.info("[RealEnv] Created XArmInterpolationController with interpolation")
+            logger.info(
+                "[RealEnv] Created XArmInterpolationController with interpolation"
+            )
         else:
             # Create a standard controller
             robot = XArmController(
@@ -353,21 +359,25 @@ class RealEnv:
                 new_timestamps,
             )
 
-    def exec_action_waypoints(self,
-            actions: np.ndarray, 
-            timestamps: np.ndarray, 
-            stages: Optional[np.ndarray]=None):
+    def exec_action_waypoints(
+        self,
+        actions: np.ndarray,
+        timestamps: np.ndarray,
+        stages: Optional[np.ndarray] = None,
+    ):
         """
         Execute actions as waypoints with interpolation for smooth motion.
         This method should be used with XArmInterpolationController.
-    
+
         Args:
             actions: Array of action vectors, each containing 7 values (6 for pose, 1 for grasp)
             timestamps: Array of target timestamps for each action
             stages: Optional array of stage values for each action
         """
-        assert self.is_ready, "RealEnv must be initialized and ready before executing actions"
-    
+        assert (
+            self.is_ready
+        ), "RealEnv must be initialized and ready before executing actions"
+
         # Convert inputs to numpy arrays if they aren't already
         if not isinstance(actions, np.ndarray):
             actions = np.array(actions)
@@ -377,40 +387,46 @@ class RealEnv:
             stages = np.zeros_like(timestamps, dtype=np.int64)
         elif not isinstance(stages, np.ndarray):
             stages = np.array(stages, dtype=np.int64)
-    
+
         # Verify action dimensions
-        assert actions.ndim >= 1 and actions.shape[-1] == 7, f"Actions must have shape (N, 7), got {actions.shape}"
+        assert (
+            actions.ndim >= 1 and actions.shape[-1] == 7
+        ), f"Actions must have shape (N, 7), got {actions.shape}"
         if actions.ndim == 1:
             # Single action, add batch dimension
             actions = np.expand_dims(actions, axis=0)
             timestamps = np.expand_dims(timestamps, axis=0)
             stages = np.expand_dims(stages, axis=0)
-    
+
         # Ensure arrays have the same length
         n_actions = len(actions)
-        assert len(timestamps) == n_actions, f"Timestamps length {len(timestamps)} must match actions length {n_actions}"
-        assert len(stages) == n_actions, f"Stages length {len(stages)} must match actions length {n_actions}"
+        assert (
+            len(timestamps) == n_actions
+        ), f"Timestamps length {len(timestamps)} must match actions length {n_actions}"
+        assert (
+            len(stages) == n_actions
+        ), f"Stages length {len(stages)} must match actions length {n_actions}"
 
         # Filter actions that are in the future
         receive_time = time.time()
         is_new = timestamps > receive_time
-    
+
         # For policy mode, we want to limit how many actions we send at once
         # This helps prevent overloading the controller
         if n_actions > 1:  # If this is the policy sending actions (typically batched)
             # Print info for debugging
-            print(f"Scheduling waypoint...")
+            print("Scheduling waypoint...")
             print(f"Pose: {actions[0, :6]}")
-        
+
             # If we have many actions, just use the first one
             # The policy will send more in the next iteration
             if np.sum(is_new) > 1:
                 # Take only the first action that's in the future
                 future_indices = np.where(is_new)[0]
                 first_idx = future_indices[0]
-                new_actions = actions[first_idx:first_idx+1]
-                new_timestamps = timestamps[first_idx:first_idx+1]
-                new_stages = stages[first_idx:first_idx+1]
+                new_actions = actions[first_idx : first_idx + 1]
+                new_timestamps = timestamps[first_idx : first_idx + 1]
+                new_stages = stages[first_idx : first_idx + 1]
             elif np.sum(is_new) == 1:
                 # Just one future action, use it
                 new_actions = actions[is_new]
@@ -428,7 +444,9 @@ class RealEnv:
                 # If no future actions, use the last action with a small time offset
                 if n_actions > 0:
                     new_actions = actions  # Just use the provided action
-                    new_timestamps = np.array([receive_time + 0.05])  # 50ms in the future
+                    new_timestamps = np.array(
+                        [receive_time + 0.05]
+                    )  # 50ms in the future
                     new_stages = stages
                 else:
                     # No actions provided, return early
@@ -450,11 +468,9 @@ class RealEnv:
                 # Schedule the waypoint with the interpolation controller
                 # Ensure the timestamp is at least a bit in the future for smoothing
                 target_time = max(new_timestamps[i], time.time() + 0.02)
-            
+
                 self.robot.schedule_waypoint(
-                    pose=pose, 
-                    target_time=target_time,
-                    grasp=grasp
+                    pose=pose, target_time=target_time, grasp=grasp
                 )
             except Exception as e:
                 logger.error(f"Error scheduling waypoint: {e}")

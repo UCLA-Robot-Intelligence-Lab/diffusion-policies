@@ -1,9 +1,7 @@
-import unittest
 import zarr
 import numpy as np
 import torch
 import torch.nn as nn
-import logging
 
 from typing import Union, Dict
 from shared.utils.pytorch_util import dict_apply
@@ -634,8 +632,8 @@ def test():
     dataun = normalizer.unnormalize(datan)
     assert torch.allclose(data, dataun, atol=1e-7)
 
-    input_stats = normalizer.get_input_stats()
-    output_stats = normalizer.get_output_stats()
+    normalizer.get_input_stats()
+    normalizer.get_output_stats()
 
     # Test SingleFieldLinearNormalizer without fitting offset
     normalizer = SingleFieldLinearNormalizer()
@@ -671,8 +669,8 @@ def test():
     dataun = normalizer.unnormalize(datan)
     assert torch.allclose(data, dataun, atol=1e-7)
 
-    input_stats = normalizer.get_input_stats()
-    output_stats = normalizer.get_output_stats()
+    normalizer.get_input_stats()
+    normalizer.get_output_stats()
 
     # Test LinearNormalizer with multiple dictionary entries
     data = {
@@ -686,8 +684,8 @@ def test():
     for key in data:
         assert torch.allclose(data[key], dataun[key], atol=1e-4)
 
-    input_stats = normalizer.get_input_stats()
-    output_stats = normalizer.get_output_stats()
+    normalizer.get_input_stats()
+    normalizer.get_output_stats()
 
     # Test state_dict functionality
     state_dict = normalizer.state_dict()

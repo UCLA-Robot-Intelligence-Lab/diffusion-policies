@@ -138,7 +138,7 @@ def test():
 
     wrapper = RobomimicImageWrapper(env=env, shape_meta=shape_meta)
     wrapper.seed(0)
-    obs = wrapper.reset()
+    wrapper.reset()
     img = wrapper.render()
     plt.imshow(img)
 

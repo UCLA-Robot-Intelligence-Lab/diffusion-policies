@@ -40,7 +40,7 @@ __all__ = [
     "positive_y_is_up",
 ]
 
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 import pygame
 
@@ -142,8 +142,7 @@ class DrawOptions(pymunk.SpaceDebugDrawOptions):
         )
 
         circle_edge = pos + Vec2d(radius, 0).rotated(angle)
-        p2 = to_pygame(circle_edge, self.surface)
-        line_r = 2 if radius > 20 else 1
+        to_pygame(circle_edge, self.surface)
         # pygame.draw.lines(self.surface, outline_color.as_int(), False, [p, p2], line_r)
 
     def draw_segment(self, a: Vec2d, b: Vec2d, color: SpaceDebugColor) -> None:

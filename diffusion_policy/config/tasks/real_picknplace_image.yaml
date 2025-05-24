@@ -22,14 +22,14 @@ env_runner:
 
 dataset:
   _target_: shared.env.picknplace.picknplace_image_dataset.PickNPlaceImageDataset
-  dataset_path: data/picknplace_80
+  dataset_path: data/picknplace_40_seed_371
   shape_meta: *shape_meta
   horizon: ${horizon}
   pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}
-  seed: 42
+  seed: 371
   val_ratio: 0.00
-  max_train_episodes: 80
+  max_train_episodes: 40
   num_obs_steps: ${dataset_obs_steps}
   num_latency_steps: ${num_latency_steps}
   delta_action: True

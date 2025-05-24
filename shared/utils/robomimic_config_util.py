@@ -1,6 +1,5 @@
 import robomimic.scripts.generate_paper_configs as gpc
 
-from omegaconf import OmegaConf
 from robomimic.config import config_factory
 from robomimic.scripts.generate_paper_configs import (
     modify_config_for_default_image_exp,
