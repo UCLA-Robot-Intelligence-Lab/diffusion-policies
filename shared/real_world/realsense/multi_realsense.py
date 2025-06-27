@@ -148,7 +148,6 @@ class MultiRealsense:
             i += 1
         return out
 
-
     def set_color_option(self, option, value):
         logger.info(f"MultiRealsense.set_color_option({option}, {value})")
         for camera in self.cameras.values():

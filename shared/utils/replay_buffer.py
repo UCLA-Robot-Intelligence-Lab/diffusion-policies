@@ -110,10 +110,10 @@ class ReplayBuffer:
             if storage is None:
                 storage = zarr.MemoryStore()
             root = zarr.group(store=storage)
-        data = root.require_group("data", overwrite=False)
+        root.require_group("data", overwrite=False)
         meta = root.require_group("meta", overwrite=False)
         if "episode_ends" not in meta:
-            episode_ends = meta.zeros(
+            meta.zeros(
                 "episode_ends",
                 shape=(0,),
                 dtype=np.int64,

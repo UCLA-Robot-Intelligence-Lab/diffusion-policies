@@ -25,10 +25,8 @@ import matplotlib
 
 matplotlib.use("Agg")  # Non-GUI backend
 import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
 
 from hydra.core.hydra_config import HydraConfig
-from hydra import initialize, compose
 from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
@@ -191,6 +189,18 @@ class TrainDiffusionUnetImageWorkspace:
             if latest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {latest_ckpt_path}")
                 self.load_checkpoint(path=latest_ckpt_path)
+                print(
+                    "After loading checkpoint: epoch =",
+                    self.epoch,
+                    "global_step =",
+                    self.global_step,
+                )
+                print(
+                    "After loading checkpoint: epoch =",
+                    self.epoch,
+                    "global_step =",
+                    self.global_step,
+                )
 
         # Configure dataset
         dataset = hydra.utils.instantiate(cfg.tasks.dataset)
@@ -240,7 +250,7 @@ class TrainDiffusionUnetImageWorkspace:
             config=OmegaConf.to_container(cfg, resolve=True),
             **cfg.logging,
         )
-        wandb.config.update({"output_dir": self.output_dir})
+        wandb.config.update({"output_dir": self.output_dir}, allow_val_change=True)
 
         """
         TopK Checkpoint manager works by maintaining top-K model

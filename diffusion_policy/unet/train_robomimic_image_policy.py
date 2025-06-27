@@ -16,16 +16,13 @@ import random
 import wandb
 import tqdm
 import numpy as np
-import shutil
 
 from hydra.core.hydra_config import HydraConfig
-from hydra import initialize, compose
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from shared.utils.checkpoint_util import TopKCheckpointManager
 from shared.utils.json_logger import JsonLogger
-from shared.utils.pytorch_util import dict_apply, optimizer_to
-from diffusion_policy.unet.robomimic_image_policy import RobomimicImagePolicy
+from shared.utils.pytorch_util import dict_apply
 
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)

@@ -24,11 +24,8 @@ import time
 import matplotlib
 
 matplotlib.use("Agg")  # Non-GUI backend
-import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
 
 from hydra.core.hydra_config import HydraConfig
-from hydra import initialize, compose
 from omegaconf import OmegaConf
 from typing import Optional
 from torch.utils.data import DataLoader
@@ -40,7 +37,6 @@ from shared.utils.pytorch_util import (
     dict_apply,
     optimizer_to,
     copy_to_cpu,
-    temporary_attribute,
 )
 from shared.models.unet.ema_model import EMAModel
 from shared.models.common.lr_scheduler import get_scheduler
@@ -69,12 +65,18 @@ class TrainDiffusionUnetLowdimWorkspace:
         print(f"Available CUDA devices: {torch.cuda.device_count()}")
         print(f"Current CUDA device: {torch.cuda.current_device()}")
         for i in range(torch.cuda.device_count()):
-            print(f"CUDA device {i}: {torch.cuda.get_device_name(i)}, Free memory: {torch.cuda.get_device_properties(i).total_memory / (1024**3):.2f} GB")
+            print(
+                f"CUDA device {i}: {torch.cuda.get_device_name(i)}, Free memory: {torch.cuda.get_device_properties(i).total_memory / (1024**3):.2f} GB"
+            )
 
         # Debug print
-        print(f"Creating model with: obs_dim={cfg.obs_dim}, action_dim={cfg.action_dim}, num_obs_steps={cfg.num_obs_steps}")
-        print(f"Expected global cond dim: {cfg.obs_dim * cfg.num_obs_steps}, cond_dim_G in config: {cfg.policy.model.cond_dim_G}")
-        
+        print(
+            f"Creating model with: obs_dim={cfg.obs_dim}, action_dim={cfg.action_dim}, num_obs_steps={cfg.num_obs_steps}"
+        )
+        print(
+            f"Expected global cond dim: {cfg.obs_dim * cfg.num_obs_steps}, cond_dim_G in config: {cfg.policy.model.cond_dim_G}"
+        )
+
         # Configure model
         self.model: DiffusionUnetLowdimPolicy = hydra.utils.instantiate(cfg.policy)
 
@@ -161,7 +163,7 @@ class TrainDiffusionUnetLowdimWorkspace:
 
         # Device setup
         device = torch.device(cfg.training.device)
-        
+
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
@@ -286,7 +288,7 @@ class TrainDiffusionUnetLowdimWorkspace:
                             train_sampling_batch,
                             lambda x: x.to(device, non_blocking=True),
                         )
-                        obs_dict = {'obs': batch['obs']}
+                        obs_dict = {"obs": batch["obs"]}
                         gt_action = batch["action"]
 
                         t0 = time.time()
@@ -328,7 +330,9 @@ class TrainDiffusionUnetLowdimWorkspace:
                         if topk_ckpt_path is not None:
                             self.save_checkpoint(path=topk_ckpt_path)
                     else:
-                        print(f"Warning: Monitor key '{monitor_key}' not found in metrics. Available keys: {list(metric_dict.keys())}")
+                        print(
+                            f"Warning: Monitor key '{monitor_key}' not found in metrics. Available keys: {list(metric_dict.keys())}"
+                        )
 
                 # ========= End of Evaluation ==========
                 policy.train()
@@ -429,13 +433,13 @@ class TrainDiffusionUnetLowdimWorkspace:
 )
 def main(cfg):
     # Print loaded config info before creating workspace
-    print(f"Loaded config:")
+    print("Loaded config:")
     print(f"Config device setting: {cfg.device}")
     print(f"Config training.device setting: {cfg.training.device}")
-    
+
     workspace = TrainDiffusionUnetLowdimWorkspace(cfg)
     workspace.run()
 
 
 if __name__ == "__main__":
-    main() 
+    main()

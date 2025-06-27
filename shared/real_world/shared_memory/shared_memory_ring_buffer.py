@@ -5,7 +5,10 @@ import numpy as np
 from typing import Dict, List, Union
 from multiprocessing.managers import SharedMemoryManager
 from shared.real_world.shared_memory.shared_ndarray import SharedNDArray
-from shared.real_world.shared_memory.shared_memory_util import ArraySpec, SharedAtomicCounter
+from shared.real_world.shared_memory.shared_memory_util import (
+    ArraySpec,
+    SharedAtomicCounter,
+)
 
 
 class SharedMemoryRingBuffer:

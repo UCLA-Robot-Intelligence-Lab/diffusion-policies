@@ -231,7 +231,6 @@ class RobomimicImageRunner:
 
     def run(self, policy):
         device = policy.device
-        dtype = policy.dtype
         env = self.env
 
         # plan for rollout

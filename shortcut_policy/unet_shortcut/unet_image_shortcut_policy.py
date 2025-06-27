@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from shared.models.common.normalizer import LinearNormalizer
@@ -130,7 +130,6 @@ class UnetImageShortcutPolicy(nn.Module):
         Ta = self.num_action_steps
         To = self.num_obs_steps
         Fa = self.action_dim_Fa
-        Fo = self.obs_feat_dim_Fo
         B = obs["image"].shape[0]
 
         # Normalize obs
@@ -219,7 +218,7 @@ class UnetImageShortcutPolicy(nn.Module):
         obs_encoder = self.obs_encoder
         global_obs_cond = self.global_obs_cond
         To = self.num_obs_steps
-        T = batch["action"].shape[1]
+        batch["action"].shape[1]
         B = batch["action"].shape[0]
 
         # 1) Normalize data

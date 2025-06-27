@@ -132,31 +132,31 @@ class DiffusionUnetImagePolicy(nn.Module):
     def observe(self, obs_dict):
         """
         Encodes observations using the obs_encoder
-        
+
         Args:
             obs_dict: Dictionary of observations
-                
+
         Returns:
             obs_feat: Observation features
-            global_obs_feat: Global observation features 
+            global_obs_feat: Global observation features
         """
         B = next(iter(obs_dict.values())).shape[0]
         To = self.num_obs_steps
-        
+
         # Prepare tensors for encoder
         flat_obs = dict_apply(
             obs_dict, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:])
         )
-        
+
         # Encode observations
         obs_feat_flat = self.obs_encoder(flat_obs)
-        
+
         # Reshape back to batch dimension
         obs_feat = obs_feat_flat.reshape(B, To, -1)
-        
+
         # Global observation feature is flattened version
         global_obs_feat = obs_feat.reshape(B, -1)
-        
+
         return obs_feat, global_obs_feat
 
     # ========= INFERENCE =========
@@ -257,7 +257,7 @@ class DiffusionUnetImagePolicy(nn.Module):
         Fo = self.obs_feat_dim_Fo
 
         normalized_obs = normalizer.normalize(obs)
-        value  = next(iter(obs.values()))
+        value = next(iter(obs.values()))
         B, To_cp = value.shape[:2]
         assert To_cp == To, f"To_cp: {To_cp}, To: {To}"
 

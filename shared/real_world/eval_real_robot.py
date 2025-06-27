@@ -1,7 +1,6 @@
 import time
 from multiprocessing.managers import SharedMemoryManager
 import click
-import cv2
 import numpy as np
 import torch
 import traceback
@@ -13,21 +12,27 @@ from omegaconf import OmegaConf
 import scipy.spatial.transform as st
 
 from shared.real_world.control.spacemouse import Spacemouse
-from shared.real_world.record_utils.keystroke_counter import KeystrokeCounter, Key, KeyCode
+from shared.real_world.record_utils.keystroke_counter import (
+    KeystrokeCounter,
+    Key,
+    KeyCode,
+)
 from shared.real_world.record_utils.precise_sleep import precise_wait
-from shared.real_world.control.xarm_controller import XArmConfig, XArmInterpolationController
+from shared.real_world.control.xarm_controller import (
+    XArmConfig,
+)
 from shared.real_world.real_env import RealEnv
-from shared.real_world.record_utils.precise_sleep import precise_wait
 from shared.real_world.real_inference_util import (
-    get_real_obs_resolution, 
-    get_real_obs_dict)
+    get_real_obs_resolution,
+    get_real_obs_dict,
+)
 from shared.utils.pytorch_util import dict_apply
-from shared.real_world.record_utils.cv2_util import get_image_transform
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
+
 
 def main(
     input="./checkpoints/epoch=0250-train_loss=0.005.ckpt",
@@ -39,8 +44,8 @@ def main(
     record_res=(1280, 720),
     spacemouse_deadzone=0.05,
     use_interpolation=True,  # Enable interpolation by default for smoother motion
-    max_pos_speed=0.25,      # Position speed limit (m/s)
-    max_rot_speed=0.6,       # Rotation speed limit (degrees/s)
+    max_pos_speed=0.25,  # Position speed limit (m/s)
+    max_rot_speed=0.6,  # Rotation speed limit (degrees/s)
 ):
     dt = 1.0 / frequency
     output_dir = pathlib.Path(output)
@@ -49,8 +54,8 @@ def main(
     # Load checkpoint
     ckpt_path = input
     print("CHECKPOINT: ", ckpt_path, "\n\n")
-    payload = torch.load(open(ckpt_path, 'rb'), pickle_module=dill)
-    cfg = payload['cfg']
+    payload = torch.load(open(ckpt_path, "rb"), pickle_module=dill)
+    cfg = payload["cfg"]
     cls = hydra.utils.get_class(cfg._target_)
     print("CONFIG: ", cfg)
     workspace = cls(cfg)
@@ -59,13 +64,13 @@ def main(
     # Setup for different policy types
     action_offset = 0
     delta_action = False
-    if 'diffusion' in cfg.name:
+    if "diffusion" in cfg.name:
         # diffusion model
         policy = workspace.model
         if cfg.training.use_ema:
             policy = workspace.ema_model
 
-        device = torch.device('cuda')
+        device = torch.device("cuda")
         policy.eval().to(device)
 
         # set inference params
@@ -78,20 +83,22 @@ def main(
 
     # Handle both cfg.shape_meta and cfg.task.shape_meta cases
     shape_meta = None
-    if hasattr(cfg, 'shape_meta'):
+    if hasattr(cfg, "shape_meta"):
         shape_meta = cfg.shape_meta
         print("Using shape_meta from cfg.shape_meta")
-    elif hasattr(cfg, 'tasks') and hasattr(cfg.tasks, 'shape_meta'):
+    elif hasattr(cfg, "tasks") and hasattr(cfg.tasks, "shape_meta"):
         shape_meta = cfg.tasks.shape_meta
         print("Using shape_meta from cfg.tasks.shape_meta")
-    elif hasattr(cfg, 'task') and hasattr(cfg.task, 'shape_meta'):
+    elif hasattr(cfg, "task") and hasattr(cfg.task, "shape_meta"):
         shape_meta = cfg.task.shape_meta
         print("Using shape_meta from cfg.task.shape_meta")
     else:
         print("Available keys in cfg:", cfg.keys())
-        raise ValueError("Could not find shape_meta in config. Please specify either cfg.shape_meta, cfg.tasks.shape_meta, or cfg.task.shape_meta")
+        raise ValueError(
+            "Could not find shape_meta in config. Please specify either cfg.shape_meta, cfg.tasks.shape_meta, or cfg.task.shape_meta"
+        )
 
-    obs_res = get_real_obs_resolution(shape_meta)
+    get_real_obs_resolution(shape_meta)
     num_obs_steps = cfg.num_obs_steps
     logger.info(f"num_obs_steps: {num_obs_steps}")
     logger.info(f"steps_per_inference: {steps_per_inference}")
@@ -125,37 +132,43 @@ def main(
             # Warm up policy inference
             logger.info("Warming up policy inference...")
             obs = env.get_obs()
-            
+
             # Debug: print observation keys and shape_meta
             print("\nObservation keys:", list(obs.keys()))
             print("\nShape meta structure:", shape_meta)
-            
+
             # Get robot state and add it to the observation
             robot_state = env.get_robot_state()
             print("\nRobot state keys:", list(robot_state.keys()))
-            obs['robot_eef_pose'] = np.array([robot_state['TCPPose']] * obs['timestamp'].shape[0])
+            obs["robot_eef_pose"] = np.array(
+                [robot_state["TCPPose"]] * obs["timestamp"].shape[0]
+            )
             print("\nUpdated observation keys:", list(obs.keys()))
             print("\n")
-            
+
             with torch.no_grad():
                 policy.reset()
                 obs_dict_np = get_real_obs_dict(env_obs=obs, shape_meta=shape_meta)
-                
+
                 # The policy may expect different formats of the observation
                 # Create both formats to handle different model types
-                if 'obs' not in obs_dict_np:
+                if "obs" not in obs_dict_np:
                     # Format 1: With 'obs' wrapper
-                    obs_dict_with_wrapper = {'obs': obs_dict_np}
-                    
+                    obs_dict_with_wrapper = {"obs": obs_dict_np}
+
                     # Format 2: Direct features (no wrapper)
                     obs_dict_direct = obs_dict_np
-                    
+
                     # Convert both to torch tensors
-                    obs_dict_with_wrapper_torch = dict_apply(obs_dict_with_wrapper, 
-                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
-                    obs_dict_direct_torch = dict_apply(obs_dict_direct, 
-                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
-                    
+                    obs_dict_with_wrapper_torch = dict_apply(
+                        obs_dict_with_wrapper,
+                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device),
+                    )
+                    obs_dict_direct_torch = dict_apply(
+                        obs_dict_direct,
+                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device),
+                    )
+
                     # Try both formats
                     try:
                         # First try with 'obs' wrapper
@@ -169,11 +182,13 @@ def main(
                         print("Model expects direct features (no 'obs' wrapper)")
                 else:
                     # Normal case: obs_dict_np already has 'obs' key
-                    obs_dict = dict_apply(obs_dict_np, 
-                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
+                    obs_dict = dict_apply(
+                        obs_dict_np,
+                        lambda x: torch.from_numpy(x).unsqueeze(0).to(device),
+                    )
                     result = policy.predict_action(obs_dict)
-                    
-                action = result['action'][0].detach().to('cpu').numpy()
+
+                action = result["action"][0].detach().to("cpu").numpy()
                 assert action.shape[-1] == 6  # xy position
                 del result
 
@@ -205,7 +220,9 @@ def main(
 
                         # Add robot state
                         robot_state = env.get_robot_state()
-                        obs['robot_eef_pose'] = np.array([robot_state['TCPPose']] * obs['timestamp'].shape[0])
+                        obs["robot_eef_pose"] = np.array(
+                            [robot_state["TCPPose"]] * obs["timestamp"].shape[0]
+                        )
 
                         # Handle key presses
                         press_events = key_counter.get_press_events()
@@ -223,7 +240,6 @@ def main(
                         stage_val = key_counter[Key.space]
 
                         # Visualize
-                        episode_id = env.replay_buffer.n_episodes
 
                         precise_wait(t_sample)
 
@@ -236,7 +252,9 @@ def main(
 
                         # Check if movement is significant
                         input_magnitude = np.linalg.norm(dpos) + np.linalg.norm(drot)
-                        significant_movement = input_magnitude > spacemouse_deadzone * 8.0
+                        significant_movement = (
+                            input_magnitude > spacemouse_deadzone * 8.0
+                        )
                         if significant_movement:
                             dpos *= xarm_config.position_gain
                             drot *= xarm_config.orientation_gain
@@ -244,7 +262,9 @@ def main(
                             curr_rot = st.Rotation.from_euler(
                                 "xyz", target_pose[3:], degrees=True
                             )
-                            delta_rot = st.Rotation.from_euler("xyz", drot, degrees=True)
+                            delta_rot = st.Rotation.from_euler(
+                                "xyz", drot, degrees=True
+                            )
                             final_rot = delta_rot * curr_rot
 
                             target_pose[:3] += dpos
@@ -252,8 +272,10 @@ def main(
 
                             action = np.concatenate([target_pose, [grasp]])
 
-                            exec_timestamp = (t_command_target - time.monotonic() + time.time())
-                            
+                            exec_timestamp = (
+                                t_command_target - time.monotonic() + time.time()
+                            )
+
                             # Use interpolation if enabled
                             if use_interpolation:
                                 env.exec_action_waypoints(
@@ -267,11 +289,15 @@ def main(
                                     timestamps=[exec_timestamp],
                                     stages=[stage_val],
                                 )
-                            logger.debug("Significant movement detected, executing action.")
+                            logger.debug(
+                                "Significant movement detected, executing action."
+                            )
                         else:
                             action = np.concatenate([target_pose, [grasp]])
-                            exec_timestamp = (t_command_target - time.monotonic() + time.time())
-                            
+                            exec_timestamp = (
+                                t_command_target - time.monotonic() + time.time()
+                            )
+
                             # Use interpolation if enabled
                             if use_interpolation:
                                 env.exec_action_waypoints(
@@ -298,27 +324,29 @@ def main(
                     t_start = time.monotonic() + start_delay
                     env.start_episode(eval_t_start)
                     # Wait for 1/30 sec to get the closest frame
-                    frame_latency = 1/30
+                    frame_latency = 1 / 30
                     precise_wait(eval_t_start - frame_latency, time_func=time.time)
                     logger.info("Policy evaluation started!")
                     iter_idx = 0
-                    term_area_start_timestamp = float('inf')
+                    float("inf")
                     prev_target_pose = None
                     is_recording = True
-                    
+
                     while True:
                         # Calculate timing for policy control
                         t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
 
                         # Get observations
                         obs = env.get_obs()
-                        obs_timestamps = obs['timestamp']
-                        
+                        obs_timestamps = obs["timestamp"]
+
                         # Add robot state
                         robot_state = env.get_robot_state()
-                        obs['robot_eef_pose'] = np.array([robot_state['TCPPose']] * obs['timestamp'].shape[0])
-                        
-                        logger.debug(f'Obs latency {time.time() - obs_timestamps[-1]}')
+                        obs["robot_eef_pose"] = np.array(
+                            [robot_state["TCPPose"]] * obs["timestamp"].shape[0]
+                        )
+
+                        logger.debug(f"Obs latency {time.time() - obs_timestamps[-1]}")
 
                         # Check for key presses during policy control
                         press_events = key_counter.get_press_events()
@@ -330,7 +358,9 @@ def main(
                                 logger.info("Policy evaluation stopped.")
                                 break
                             elif key_stroke == Key.backspace:
-                                if click.confirm("Drop the most recently recorded episode?"):
+                                if click.confirm(
+                                    "Drop the most recently recorded episode?"
+                                ):
                                     env.drop_episode()
                                     is_recording = False
                                     logger.info("Episode dropped.")
@@ -341,95 +371,130 @@ def main(
                         # Run policy inference
                         with torch.no_grad():
                             s = time.time()
-                            obs_dict_np = get_real_obs_dict(env_obs=obs, shape_meta=shape_meta)
-                            
+                            obs_dict_np = get_real_obs_dict(
+                                env_obs=obs, shape_meta=shape_meta
+                            )
+
                             # Handle different model architectures
-                            if 'obs' not in obs_dict_np:
+                            if "obs" not in obs_dict_np:
                                 # Format 1: With 'obs' wrapper
-                                obs_dict_with_wrapper = {'obs': obs_dict_np}
-                                
+                                obs_dict_with_wrapper = {"obs": obs_dict_np}
+
                                 # Format 2: Direct features (no wrapper)
                                 obs_dict_direct = obs_dict_np
-                                
+
                                 # Convert both to torch tensors
-                                obs_dict_with_wrapper_torch = dict_apply(obs_dict_with_wrapper, 
-                                    lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
-                                obs_dict_direct_torch = dict_apply(obs_dict_direct, 
-                                    lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
-                                
+                                obs_dict_with_wrapper_torch = dict_apply(
+                                    obs_dict_with_wrapper,
+                                    lambda x: torch.from_numpy(x)
+                                    .unsqueeze(0)
+                                    .to(device),
+                                )
+                                obs_dict_direct_torch = dict_apply(
+                                    obs_dict_direct,
+                                    lambda x: torch.from_numpy(x)
+                                    .unsqueeze(0)
+                                    .to(device),
+                                )
+
                                 # Try both formats, using what we learned in the initialization
                                 try:
                                     # First try with 'obs' wrapper
-                                    result = policy.predict_action(obs_dict_with_wrapper_torch)
+                                    result = policy.predict_action(
+                                        obs_dict_with_wrapper_torch
+                                    )
                                 except (KeyError, AttributeError):
                                     # If that fails, try direct features
-                                    result = policy.predict_action(obs_dict_direct_torch)
+                                    result = policy.predict_action(
+                                        obs_dict_direct_torch
+                                    )
                             else:
                                 # Normal case: obs_dict_np already has 'obs' key
-                                obs_dict = dict_apply(obs_dict_np, 
-                                    lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
+                                obs_dict = dict_apply(
+                                    obs_dict_np,
+                                    lambda x: torch.from_numpy(x)
+                                    .unsqueeze(0)
+                                    .to(device),
+                                )
                                 result = policy.predict_action(obs_dict)
-                                
-                            action = result['action'][0].detach().to('cpu').numpy()
+
+                            action = result["action"][0].detach().to("cpu").numpy()
                             print("ACTION: ", action)
-                            
+
                             # The action array only has 6 columns (not 7), so we can't check index 6
                             # Setting grasp to a fixed value since we have no grasp data in the actions
                             grasp = 0.0  # Default to no grasp
-                            
-                            logger.debug(f'Inference latency: {time.time() - s}')
-                        
+
+                            logger.debug(f"Inference latency: {time.time() - s}")
+
                         # Convert policy action to robot actions
                         if delta_action:
                             assert len(action) == 1
                             if prev_target_pose is None:
-                                prev_target_pose = obs['robot_eef_pose'][-1]
+                                prev_target_pose = obs["robot_eef_pose"][-1]
                             this_target_pose = prev_target_pose.copy()
-                            this_target_pose[[0,1]] += action[-1]
+                            this_target_pose[[0, 1]] += action[-1]
                             prev_target_pose = this_target_pose
                             this_target_poses = np.expand_dims(this_target_pose, axis=0)
                         else:
                             # Get current robot state to use as base
                             robot_state = env.get_robot_state()
-                            current_pose = np.array(robot_state["TCPPose"], dtype=np.float32)
-                            
+                            current_pose = np.array(
+                                robot_state["TCPPose"], dtype=np.float32
+                            )
+
                             # Convert model's predictions to robot's coordinate space
                             # Model was trained with delta actions, so we apply them with scaling
-                            this_target_poses = np.zeros((len(action), len(current_pose)), dtype=np.float32)
-                            
+                            this_target_poses = np.zeros(
+                                (len(action), len(current_pose)), dtype=np.float32
+                            )
+
                             # Scale up the deltas for more substantial movement
                             # Apply different scaling for each axis
                             # Assuming X axis is forward direction
                             position_scale_x = 2.0  # Forward/backward scaling (X-axis)
-                            position_scale_y = 1.0   # Left/right scaling (Y-axis)
-                            position_scale_z = 1.0   # Up/down scaling (Z-axis)
-                            rotation_scale = 1.0     # Rotation scaling
-                            
+                            position_scale_y = 1.0  # Left/right scaling (Y-axis)
+                            position_scale_z = 1.0  # Up/down scaling (Z-axis)
+                            rotation_scale = 1.0  # Rotation scaling
+
                             for i in range(len(action)):
                                 # Apply scaled delta to current position
                                 this_target_poses[i] = current_pose.copy()
-                                
+
                                 # Apply different scaling to each position axis
-                                this_target_poses[i, 0] += action[i, 0] * position_scale_x  # X-axis (forward/backward)
-                                this_target_poses[i, 1] += action[i, 1] * position_scale_y  # Y-axis (left/right)
-                                this_target_poses[i, 2] += action[i, 2] * position_scale_z  # Z-axis (up/down)
-                                
+                                this_target_poses[i, 0] += (
+                                    action[i, 0] * position_scale_x
+                                )  # X-axis (forward/backward)
+                                this_target_poses[i, 1] += (
+                                    action[i, 1] * position_scale_y
+                                )  # Y-axis (left/right)
+                                this_target_poses[i, 2] += (
+                                    action[i, 2] * position_scale_z
+                                )  # Z-axis (up/down)
+
                                 # Apply rotation scaling
-                                this_target_poses[i, 3:] += action[i, 3:6] * rotation_scale
-                                
+                                this_target_poses[i, 3:] += (
+                                    action[i, 3:6] * rotation_scale
+                                )
+
                                 # Print delta for debugging
                                 if i == 0:  # Just print the first action for clarity
                                     print("Current pose:", current_pose)
                                     print("Delta action (raw):", action[i, :6])
-                                    print("Delta action (scaled X,Y,Z):", 
-                                          [action[i, 0] * position_scale_x, 
-                                           action[i, 1] * position_scale_y, 
-                                           action[i, 2] * position_scale_z])
+                                    print(
+                                        "Delta action (scaled X,Y,Z):",
+                                        [
+                                            action[i, 0] * position_scale_x,
+                                            action[i, 1] * position_scale_y,
+                                            action[i, 2] * position_scale_z,
+                                        ],
+                                    )
                                     print("Target pose:", this_target_poses[i])
 
                         # Handle timing for actions
-                        action_timestamps = (np.arange(len(action), dtype=np.float64) + action_offset
-                            ) * dt + obs_timestamps[-1]
+                        action_timestamps = (
+                            np.arange(len(action), dtype=np.float64) + action_offset
+                        ) * dt + obs_timestamps[-1]
                         action_exec_latency = 1
                         curr_time = time.time()
                         is_new = action_timestamps > (curr_time + action_exec_latency)
@@ -437,9 +502,11 @@ def main(
                             # Exceeded time budget, still do something
                             this_target_poses = this_target_poses[[-1]]
                             # Schedule on next available step
-                            next_step_idx = int(np.ceil((curr_time - eval_t_start) / dt))
+                            next_step_idx = int(
+                                np.ceil((curr_time - eval_t_start) / dt)
+                            )
                             action_timestamp = eval_t_start + (next_step_idx) * dt
-                            logger.debug(f'Over budget: {action_timestamp - curr_time}')
+                            logger.debug(f"Over budget: {action_timestamp - curr_time}")
                             action_timestamps = np.array([action_timestamp])
                         else:
                             this_target_poses = this_target_poses[is_new]
@@ -449,27 +516,30 @@ def main(
                         full_actions = []
                         for i in range(len(this_target_poses)):
                             # Add grasp parameter
-                            full_action = np.concatenate([this_target_poses[i], [grasp]])
+                            full_action = np.concatenate(
+                                [this_target_poses[i], [grasp]]
+                            )
                             full_actions.append(full_action)
-                            
+
                         # Use interpolation if enabled
                         if use_interpolation:
                             env.exec_actions(
                                 actions=full_actions,
                                 timestamps=action_timestamps,
-                                stages=[stage_val] * len(action_timestamps)
+                                stages=[stage_val] * len(action_timestamps),
                             )
                         else:
                             for i in range(len(full_actions)):
                                 env.exec_actions(
                                     actions=[full_actions[i]],
                                     timestamps=[action_timestamps[i]],
-                                    stages=[stage_val]
+                                    stages=[stage_val],
                                 )
-                        logger.info(f"Submitted {len(this_target_poses)} steps of actions.")
+                        logger.info(
+                            f"Submitted {len(this_target_poses)} steps of actions."
+                        )
 
                         # Visualize
-                        episode_id = env.replay_buffer.n_episodes
 
                         precise_wait(t_cycle_end - frame_latency)
                         iter_idx += steps_per_inference
@@ -484,6 +554,7 @@ def main(
                     if is_recording:
                         env.end_episode()
                     logger.info("Control loop ended. Returning to human control.")
+
 
 if __name__ == "__main__":
     main()

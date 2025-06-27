@@ -152,7 +152,7 @@ class SequenceSampler:
                     sample[:k_data] = input_arr[
                         buffer_start_idx : buffer_start_idx + k_data
                     ]
-                except Exception as e:
+                except Exception:
                     import pdb
 
                     pdb.set_trace()

@@ -144,8 +144,6 @@ class Port(threading.Thread):
         buffer = b""
         size_is_not_confirm = False
 
-
-
         try:
             while self.connected and self.alive:
                 try:

@@ -10,10 +10,14 @@ from typing import List
 from shared.real_world.xarm.wrapper import XArmAPI
 from multiprocessing.managers import SharedMemoryManager
 from shared.real_world.shared_memory.shared_memory_queue import SharedMemoryQueue, Empty
-from shared.real_world.shared_memory.shared_memory_ring_buffer import SharedMemoryRingBuffer
+from shared.real_world.shared_memory.shared_memory_ring_buffer import (
+    SharedMemoryRingBuffer,
+)
 from dataclasses import dataclass, field
 from shared.real_world.control.spacemouse import Spacemouse
-from shared.real_world.control.pose_trajectory_interpolator import PoseTrajectoryInterpolator
+from shared.real_world.control.pose_trajectory_interpolator import (
+    PoseTrajectoryInterpolator,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -677,19 +681,20 @@ class XArmInterpolationController(mp.Process):
     Controller for xArm that provides smooth motion through trajectory interpolation.
     Similar to RTDEInterpolationController but adapted for xArm API.
     """
+
     def __init__(
         self,
         shm_manager: SharedMemoryManager,
         xarm_config,  # Use XArmConfig from xarm_controller.py
         max_pos_speed=0.05,  # m/s - use a lower default speed for safety
-        max_rot_speed=0.2,   # degrees/s - use a lower default speed for safety
+        max_rot_speed=0.2,  # degrees/s - use a lower default speed for safety
         launch_timeout=3,
         soft_real_time=False,
         verbose=False,
     ):
         # Tested different max_pos_speed, max_rot_speed, still issue
         super().__init__(name="XArmInterpolationController")
-        
+
         # Store configuration
         self.robot_ip = xarm_config.robot_ip
         self.frequency = xarm_config.frequency
@@ -698,7 +703,7 @@ class XArmInterpolationController(mp.Process):
         self.home_pos = xarm_config.home_pos
         self.home_speed = xarm_config.home_speed
         self.tcp_maxacc = xarm_config.tcp_maxacc
-        
+
         # Additional parameters
         self.max_pos_speed = max_pos_speed
         self.max_rot_speed = max_rot_speed
@@ -708,14 +713,14 @@ class XArmInterpolationController(mp.Process):
 
         if self.verbose:
             logging.getLogger(__name__).setLevel(logging.DEBUG)
-            
+
         # Set up logger
         self.logger = logging.getLogger(__name__)
-        
+
         # Events for synchronization
         self.ready_event = mp.Event()
         self.stop_event = mp.Event()
-        
+
         # Build Input Queue
         queue_example = {
             "cmd": Command.STEP.value,
@@ -814,8 +819,12 @@ class XArmInterpolationController(mp.Process):
         super().start()
         if wait:
             self.ready_event.wait(self.launch_timeout)
-            assert self.is_alive(), "XArmInterpolationController did not start correctly."
-        self.logger.debug(f"[XArmInterpolationController] Process spawned at {self.pid}")
+            assert (
+                self.is_alive()
+            ), "XArmInterpolationController did not start correctly."
+        self.logger.debug(
+            f"[XArmInterpolationController] Process spawned at {self.pid}"
+        )
 
     def stop(self, wait=True):
         message = {"cmd": Command.STOP.value}
@@ -859,7 +868,7 @@ class XArmInterpolationController(mp.Process):
         }
 
         self.input_queue.put(cmd)
-        
+
     def schedule_waypoint(self, pose, target_time, grasp=None):
         """
         Schedule a waypoint for the robot to reach at the specified time.
@@ -868,19 +877,19 @@ class XArmInterpolationController(mp.Process):
         assert self.is_alive()
         pose = np.array(pose)
         assert pose.shape == (6,)
-        
+
         # Ensure target_time is in the future
         now = time.time()
         if target_time <= now:
             target_time = now + 0.05  # Small offset to ensure it's in the future
-        
+
         cmd = {
             "cmd": Command.SCHEDULE_WAYPOINT.value,
             "target_pose": pose,
             "grasp": self.previous_grasp if grasp is None else grasp,
             "target_time": target_time,
         }
-        
+
         self.input_queue.put(cmd)
 
     def run(self):
@@ -894,9 +903,11 @@ class XArmInterpolationController(mp.Process):
                 os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(20))
             except Exception as e:
                 self.logger.warning(f"Failed to set real-time scheduler: {e}")
-        
+
         try:
-            self.logger.info(f"[XArmInterpolationController] Connecting to xArm at {self.robot_ip}")
+            self.logger.info(
+                f"[XArmInterpolationController] Connecting to xArm at {self.robot_ip}"
+            )
             arm = XArmAPI(self.robot_ip)
             arm.connect()
             arm.clean_error()
@@ -906,42 +917,49 @@ class XArmInterpolationController(mp.Process):
             # Enable the robot
             code = arm.motion_enable(True)
             if code != 0:
-                raise RuntimeError(f"[XArmInterpolationController] motion_enable error: {code}")
-            
+                raise RuntimeError(
+                    f"[XArmInterpolationController] motion_enable error: {code}"
+                )
+
             # Set the robot mode (1 for servo mode)
             code = arm.set_mode(1)
             if code != 0:
-                raise RuntimeError(f"[XArmInterpolationController] set_mode error: {code}")
-            
+                raise RuntimeError(
+                    f"[XArmInterpolationController] set_mode error: {code}"
+                )
+
             # Set the robot state (0 for ready)
             code = arm.set_state(0)
             if code != 0:
-                raise RuntimeError(f"[XArmInterpolationController] set_state error: {code}")
+                raise RuntimeError(
+                    f"[XArmInterpolationController] set_state error: {code}"
+                )
 
             # Get the current position
             code, pos = arm.get_position(is_radian=False)
             if code == 0:
                 self.last_target_pose = np.array(pos[:6], dtype=np.float64)
-                self.logger.info(f"[XArmInterpolationController] Initial position: {self.last_target_pose}")
+                self.logger.info(
+                    f"[XArmInterpolationController] Initial position: {self.last_target_pose}"
+                )
             else:
                 self.logger.error(
                     "[XArmInterpolationController] Failed to get initial position; defaulting to zeros."
                 )
                 self.last_target_pose = np.zeros(6, dtype=np.float64)
-        
+
             # Create a specialized policy controller
             policy_controller = PolicyExecutionController(arm, logger=self.logger)
-        
+
             # Current control mode (DIRECT for human, POLICY for policy)
             control_mode = ControlMode.DIRECT
-        
+
             # Initialize pose interpolator (for direct control)
             curr_t = time.monotonic()
             pose_interp = PoseTrajectoryInterpolator(
-                times=np.array([curr_t]),
-                poses=np.array([self.last_target_pose])
+                times=np.array([curr_t]), poses=np.array([self.last_target_pose])
             )
-        
+
             start_time = time.time()
             self.ready_event.set()
 
@@ -949,7 +967,7 @@ class XArmInterpolationController(mp.Process):
             iter_idx = 0
             grasp = self.previous_grasp
             last_reset_time = 0
-        
+
             # Reset robot at the start to ensure clean state
             arm.clean_error()
             arm.clean_warn()
@@ -958,7 +976,7 @@ class XArmInterpolationController(mp.Process):
 
             while not self.stop_event.is_set():
                 t_start = time.time()
-            
+
                 # Get current time for interpolation
                 t_now = time.monotonic()
 
@@ -974,57 +992,70 @@ class XArmInterpolationController(mp.Process):
                     for i in range(n_cmd):
                         command = {key: commands[key][i] for key in commands}
                         cmd = command["cmd"]
-                    
+
                         if cmd == Command.STOP.value:
-                            self.logger.debug("[XArmInterpolationController] Received STOP command.")
+                            self.logger.debug(
+                                "[XArmInterpolationController] Received STOP command."
+                            )
                             self.stop_event.set()
                             break
-                        
+
                         elif cmd == Command.STEP.value:
                             # Direct step command - switch to DIRECT mode
                             control_mode = ControlMode.DIRECT
-                        
-                            target_pose = np.array(command["target_pose"], dtype=np.float64)
+
+                            target_pose = np.array(
+                                command["target_pose"], dtype=np.float64
+                            )
                             grasp = command["grasp"]
                             self.last_target_pose = target_pose
-                        
+
                             # Create a new interpolator for direct control
                             pose_interp = PoseTrajectoryInterpolator(
-                                times=np.array([t_now]),
-                                poses=np.array([target_pose])
+                                times=np.array([t_now]), poses=np.array([target_pose])
                             )
-                        
+
                             # Reset policy controller
                             policy_controller.last_executed_pose = None
                             policy_controller.waypoints = []
-                        
-                            self.logger.debug(f"[XArmInterpolationController] STEP command, mode: DIRECT")
-                        
+
+                            self.logger.debug(
+                                "[XArmInterpolationController] STEP command, mode: DIRECT"
+                            )
+
                         elif cmd == Command.SCHEDULE_WAYPOINT.value:
                             # Schedule waypoint - switch to POLICY mode for smoother control
                             control_mode = ControlMode.POLICY
-                        
-                            target_pose = np.array(command["target_pose"], dtype=np.float64)
+
+                            target_pose = np.array(
+                                command["target_pose"], dtype=np.float64
+                            )
                             target_time = float(command["target_time"])
                             grasp = command.get("grasp", self.previous_grasp)
-                        
+
                             # Add to policy controller
                             policy_controller.add_waypoint(target_pose, target_time)
                             self.last_target_pose = target_pose
-                        
-                            self.logger.debug(f"[XArmInterpolationController] Scheduling waypoint, mode: POLICY")
-                        
+
+                            self.logger.debug(
+                                "[XArmInterpolationController] Scheduling waypoint, mode: POLICY"
+                            )
+
                         elif cmd == Command.HOME.value:
                             # Home command - always use DIRECT mode after homing
                             control_mode = ControlMode.DIRECT
-                        
-                            self.logger.info("[XArmInterpolationController] Received HOME command.")
+
+                            self.logger.info(
+                                "[XArmInterpolationController] Received HOME command."
+                            )
                             arm.set_mode(0)
                             arm.set_state(0)
                             code = arm.set_gripper_position(850, wait=False)
                             if code != 0:
-                                self.logger.error(f"Error in set_gripper_position (HOME open): {code}")
-                            
+                                self.logger.error(
+                                    f"Error in set_gripper_position (HOME open): {code}"
+                                )
+
                             code = arm.set_servo_angle(
                                 angle=self.home_pos, speed=self.home_speed, wait=True
                             )
@@ -1032,26 +1063,32 @@ class XArmInterpolationController(mp.Process):
                             arm.set_state(0)
                             code, pos = arm.get_position(is_radian=False)
                             if code == 0:
-                                self.last_target_pose = np.array(pos[:6], dtype=np.float64)
-                            
+                                self.last_target_pose = np.array(
+                                    pos[:6], dtype=np.float64
+                                )
+
                                 # Reset the interpolator after homing
                                 pose_interp = PoseTrajectoryInterpolator(
                                     times=np.array([t_now]),
-                                    poses=np.array([self.last_target_pose])
+                                    poses=np.array([self.last_target_pose]),
                                 )
-                            
+
                                 # Reset policy controller
                                 policy_controller.last_executed_pose = None
                                 policy_controller.waypoints = []
                         else:
-                            self.logger.error(f"[XArmInterpolationController] Unknown command: {cmd}")
+                            self.logger.error(
+                                f"[XArmInterpolationController] Unknown command: {cmd}"
+                            )
 
                     # Check for errors and reset if needed (every 2 seconds)
                     current_time = time.time()
                     if current_time - last_reset_time > 2.0:
                         code, state = arm.get_state()
                         if state != 0:  # Not in ready state
-                            self.logger.warning(f"[XArmInterpolationController] Robot not ready, state: {state}")
+                            self.logger.warning(
+                                f"[XArmInterpolationController] Robot not ready, state: {state}"
+                            )
                             arm.clean_error()
                             arm.clean_warn()
                             arm.set_mode(1)
@@ -1063,23 +1100,27 @@ class XArmInterpolationController(mp.Process):
                         # Direct control mode - use interpolator
                         try:
                             pose_command = pose_interp(t_now)
-                        
+
                             # Send the command to the robot
                             code = arm.set_servo_cartesian(
                                 list(pose_command), is_radian=False
                             )
-                        
+
                             if code != 0:
-                                self.logger.error(f"[XArmInterpolationController] set_servo_cartesian error: {code}")
+                                self.logger.error(
+                                    f"[XArmInterpolationController] set_servo_cartesian error: {code}"
+                                )
                                 # Try to reset robot on error
                                 arm.clean_error()
                                 arm.clean_warn()
                                 arm.set_mode(1)
                                 arm.set_state(0)
                         except Exception as e:
-                            self.logger.error(f"[XArmInterpolationController] Direct mode error: {e}")
+                            self.logger.error(
+                                f"[XArmInterpolationController] Direct mode error: {e}"
+                            )
                             self.logger.error(traceback.format_exc())
-                        
+
                     elif control_mode == ControlMode.POLICY:
                         # Policy control mode - use specialized controller
                         policy_controller.process_waypoints()
@@ -1089,11 +1130,15 @@ class XArmInterpolationController(mp.Process):
                         if grasp == 1.0:
                             code = arm.set_gripper_position(0, wait=False)
                             if code != 0:
-                                self.logger.error(f"Error in set_gripper_position (close): {code}")
+                                self.logger.error(
+                                    f"Error in set_gripper_position (close): {code}"
+                                )
                         else:
                             code = arm.set_gripper_position(850, wait=False)
                             if code != 0:
-                                self.logger.error(f"Error in set_gripper_position (open): {code}")
+                                self.logger.error(
+                                    f"Error in set_gripper_position (open): {code}"
+                                )
                         self.previous_grasp = grasp
 
                     # Update robot state for the ring buffer
@@ -1137,9 +1182,11 @@ class XArmInterpolationController(mp.Process):
                     self.ring_buffer.put(state)
 
                 except Exception as e:
-                    self.logger.error(f"[XArmInterpolationController] Main loop exception: {e}")
+                    self.logger.error(
+                        f"[XArmInterpolationController] Main loop exception: {e}"
+                    )
                     self.logger.error(traceback.format_exc())
-                
+
                     # Try to reset the robot state on error
                     try:
                         arm.clean_error()
@@ -1156,15 +1203,19 @@ class XArmInterpolationController(mp.Process):
                     time.sleep(sleep_time)
                 else:
                     if elapsed > dt * 1.5:  # Only warn for significant overruns
-                        self.logger.warning(f"[XArmInterpolationController] Loop took too long: {elapsed:.4f}s > {dt:.4f}s")
-                
+                        self.logger.warning(
+                            f"[XArmInterpolationController] Loop took too long: {elapsed:.4f}s > {dt:.4f}s"
+                        )
+
                 iter_idx += 1
                 if iter_idx % 100 == 0:
                     self.logger.debug(
                         f"[XArmInterpolationController] Iteration {iter_idx} at {1.0/(time.time()-t_start):.2f} Hz"
                     )
         except Exception as e:
-            self.logger.error(f"[XArmInterpolationController] Fatal exception in control loop: {e}")
+            self.logger.error(
+                f"[XArmInterpolationController] Fatal exception in control loop: {e}"
+            )
             self.logger.error(traceback.format_exc())
         finally:
             try:
@@ -1178,12 +1229,14 @@ class XArmInterpolationController(mp.Process):
                 self.logger.error(f"[XArmInterpolationController] Cleanup error: {e}")
             self.ready_event.set()
 
+
 class ControlMode(enum.Enum):
     """
     Control modes for the XArmInterpolationController
     """
-    DIRECT = 0    # Direct control mode (used for human control)
-    POLICY = 1    # Policy control mode (uses smoother motion and additional checks)
+
+    DIRECT = 0  # Direct control mode (used for human control)
+    POLICY = 1  # Policy control mode (uses smoother motion and additional checks)
 
 
 class PolicyExecutionController:
@@ -1191,6 +1244,7 @@ class PolicyExecutionController:
     Specialized controller for policy execution with XArm
     Handles error states and provides smoother control with scaling
     """
+
     def __init__(self, xarm_api, logger=None):
         self.arm = xarm_api
         self.logger = logger or logging.getLogger(__name__)
@@ -1199,14 +1253,14 @@ class PolicyExecutionController:
         self.waypoints = []
         self.last_executed_pose = None
         self.motion_filter_alpha = 0.3  # Lower = smoother but laggier motion
-        
+
         # Scaling factors to reduce movement amplitude
         self.position_scale = 1.0  # Scale position movements by 50%
         self.rotation_scale = 1.0  # Scale rotation movements by 30%
-        
+
         # Center point for scaling (typically current robot position)
         self.center_position = None
-        
+
     def reset_error_state(self):
         """
         Reset the robot error state if needed
@@ -1214,18 +1268,18 @@ class PolicyExecutionController:
         current_time = time.time()
         if current_time - self.last_error_reset < self.error_reset_cooldown:
             return False
-            
+
         self.logger.info("Resetting XArm error state")
         self.arm.clean_error()
         self.arm.clean_warn()
-        
+
         # Reset servo mode
         self.arm.set_mode(1)
         self.arm.set_state(0)
-        
+
         self.last_error_reset = current_time
         return True
-        
+
     def update_center_position(self, position):
         """
         Update the center position around which scaling happens
@@ -1236,7 +1290,7 @@ class PolicyExecutionController:
             # Slowly move the center point to adapt to policy drift
             alpha = 0.05  # Very slow adaptation
             self.center_position = alpha * position + (1 - alpha) * self.center_position
-        
+
     def scale_movements(self, target_pose):
         """
         Scale movements to reduce amplitude
@@ -1249,14 +1303,14 @@ class PolicyExecutionController:
             else:
                 # If we can't get position, use the target as center
                 self.center_position = target_pose[:3]
-        
+
         # Create scaled pose
         scaled_pose = target_pose.copy()
-        
+
         # Scale position (XYZ) relative to center position
         delta_pos = target_pose[:3] - self.center_position
         scaled_pose[:3] = self.center_position + delta_pos * self.position_scale
-        
+
         # Get current orientation if we don't have executed pose
         if self.last_executed_pose is None:
             code, pos = self.arm.get_position(is_radian=False)
@@ -1264,7 +1318,7 @@ class PolicyExecutionController:
                 self.last_executed_pose = np.array(pos[:6], dtype=np.float64)
             else:
                 self.last_executed_pose = target_pose
-        
+
         # Scale rotation relative to last executed pose
         delta_rot = target_pose[3:] - self.last_executed_pose[3:]
         # Handle angle wrapping (e.g., -179 vs +179 degrees)
@@ -1273,44 +1327,50 @@ class PolicyExecutionController:
                 delta_rot[i] -= 360
             elif delta_rot[i] < -180:
                 delta_rot[i] += 360
-                
+
         scaled_pose[3:] = self.last_executed_pose[3:] + delta_rot * self.rotation_scale
-        
+
         # Log the scaling effect
-        self.logger.debug(f"Original pose: {target_pose[:3]}, Scaled: {scaled_pose[:3]}")
-        
+        self.logger.debug(
+            f"Original pose: {target_pose[:3]}, Scaled: {scaled_pose[:3]}"
+        )
+
         return scaled_pose
-        
+
     def filter_waypoint(self, target_pose):
         """
         Apply scaling and smoothing to target poses
         """
         # First scale the movements
         scaled_pose = self.scale_movements(target_pose)
-        
+
         # Then apply smoothing filter
         if self.last_executed_pose is None:
             self.last_executed_pose = scaled_pose
             return scaled_pose
-            
+
         # Simple EMA filter
         filtered_pose = scaled_pose.copy()
         alpha = self.motion_filter_alpha
-        
+
         # Filter position (XYZ)
-        filtered_pose[:3] = alpha * scaled_pose[:3] + (1-alpha) * self.last_executed_pose[:3]
-        
-        # Filter orientation 
-        filtered_pose[3:] = alpha * scaled_pose[3:] + (1-alpha) * self.last_executed_pose[3:]
-        
+        filtered_pose[:3] = (
+            alpha * scaled_pose[:3] + (1 - alpha) * self.last_executed_pose[:3]
+        )
+
+        # Filter orientation
+        filtered_pose[3:] = (
+            alpha * scaled_pose[3:] + (1 - alpha) * self.last_executed_pose[3:]
+        )
+
         # Update last executed pose
         self.last_executed_pose = filtered_pose
-        
+
         # Update center position (slow drift)
         self.update_center_position(filtered_pose[:3])
-        
+
         return filtered_pose
-        
+
     def add_waypoint(self, pose, timestamp):
         """
         Add a waypoint to the queue
@@ -1319,46 +1379,50 @@ class PolicyExecutionController:
         if len(self.waypoints) >= 3:
             # Just keep the most recent one
             self.waypoints = [self.waypoints[-1]]
-            
+
         # Add the new waypoint
         self.waypoints.append((pose, timestamp))
-        
+
     def process_waypoints(self):
         """
         Process pending waypoints
         """
         if not self.waypoints:
             return
-            
+
         current_time = time.time()
-        
+
         # Remove waypoints that are in the past
-        self.waypoints = [(pose, ts) for pose, ts in self.waypoints if ts > current_time]
-        
+        self.waypoints = [
+            (pose, ts) for pose, ts in self.waypoints if ts > current_time
+        ]
+
         if not self.waypoints:
             return
-            
+
         # Choose the oldest waypoint to execute
         pose, timestamp = self.waypoints[0]
-        
+
         # Apply scaling and filtering
         processed_pose = self.filter_waypoint(pose)
-        
+
         # Execute the waypoint
         try:
             code = self.arm.set_servo_cartesian(list(processed_pose), is_radian=False)
             if code != 0:
-                self.logger.error(f"Policy controller: set_servo_cartesian error: {code}")
+                self.logger.error(
+                    f"Policy controller: set_servo_cartesian error: {code}"
+                )
                 # Reset on error
                 self.reset_error_state()
-                
+
                 # If there's an error, clear all waypoints to prevent continued errors
                 self.waypoints = []
         except Exception as e:
             self.logger.error(f"Policy controller execution error: {e}")
             self.reset_error_state()
             self.waypoints = []
-            
+
         # Remove the executed waypoint only if successful
         if len(self.waypoints) > 0:
             self.waypoints.pop(0)

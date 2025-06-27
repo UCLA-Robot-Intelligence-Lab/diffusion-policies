@@ -1,7 +1,6 @@
 import numpy as np
 
 from copy import deepcopy
-from gym import logger
 from gym.vector.vector_env import VectorEnv
 from gym.vector.utils import concatenate, create_empty_array
 

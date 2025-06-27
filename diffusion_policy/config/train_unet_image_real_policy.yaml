@@ -1,11 +1,11 @@
 defaults:
   - _self_
-  - tasks: real_picknplace_image
+  - tasks: real_pushblock_image
 
-name: train_diffusion_picknplace_real_image_${num_inference_steps}
+name: train_diffusion_pushblock_${num_inference_steps}_50_seed_371
 _target_: diffusion_policy.unet.train_unet_image_policy.TrainDiffusionUnetImageWorkspace
 
-device: "cuda:6"
+device: "cuda:0"
 
 task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}

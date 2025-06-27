@@ -46,7 +46,8 @@ class JsonLogger:
         self, path: str, filter_fn: Optional[Callable[[str, Any], bool]] = None
     ):
         if filter_fn is None:
-            filter_fn = lambda k, v: isinstance(v, numbers.Number)
+            def filter_fn(k, v):
+                return isinstance(v, numbers.Number)
 
         # default to append mode
         self.path = path

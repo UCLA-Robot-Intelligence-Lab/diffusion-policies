@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Dict, Sequence, Union, Optional
+from typing import Dict, Optional
 from gym import spaces
 from shared.env.pusht.pusht_env import PushTEnv
 from shared.env.pusht.pymunk_keypoint_manager import PymunkKeypointManager

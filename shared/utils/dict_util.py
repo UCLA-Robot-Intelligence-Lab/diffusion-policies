@@ -1,13 +1,14 @@
-from typing import Dict, Callable, Any
+from typing import Dict, Callable
+
 
 def dict_apply(obj: Dict, fn: Callable) -> Dict:
     """
     Apply a function to all values in a dictionary. Works recursively.
-    
+
     Args:
         obj: Dictionary to apply function to
         fn: Function to apply to each value
-        
+
     Returns:
         Dictionary with function applied to all values
     """
@@ -16,4 +17,4 @@ def dict_apply(obj: Dict, fn: Callable) -> Dict:
     elif isinstance(obj, (list, tuple)):
         return type(obj)(dict_apply(v, fn) for v in obj)
     else:
-        return fn(obj) 
+        return fn(obj)
