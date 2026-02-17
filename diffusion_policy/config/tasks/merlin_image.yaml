@@ -1,0 +1,34 @@
+name: merlin_image
+
+image_shape: &image_shape [3, 240, 320]
+shape_meta: &shape_meta
+  obs:
+    camera_0:
+      shape: *image_shape
+      type: rgb
+    robot_state:
+      shape: [12]
+      type: low_dim
+  action:
+    shape: [6]
+
+env_runner:
+  _target_: shared.env.merlin.merlin_runner.MerlinRunner
+  output_dir: ${hydra:runtime.output_dir}
+
+dataset:
+  _target_: shared.env.merlin.merlin_image_dataset.MerlinImageDataset
+  dataset_path: data
+  shape_meta: *shape_meta
+  horizon: ${horizon}
+  pad_before: ${eval:'${num_obs_steps}-1'}
+  pad_after: ${eval:'${num_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.05
+  max_train_episodes: null
+  num_obs_steps: ${dataset_obs_steps}
+  num_latency_steps: ${num_latency_steps}
+  # Derived from scripts/merlin/inspect_merlin_data_stdlib.py on current copied dataset.
+  first_cut: 0
+  encoder_window: 16
+  use_cache: False
