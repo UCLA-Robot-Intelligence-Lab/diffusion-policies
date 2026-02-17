@@ -55,15 +55,8 @@ def _resolve_merlin_root(dataset_path: str) -> str:
 
 class MerlinImageDataset(Dataset):
     """
-    MERLIN dataset adapter for diffusion-policies image training.
-
-    Expected directory layout under dataset_path:
-      camera/mp4_files/*.mp4
-      processed_encoder_t/*.npy
-      processed_action_t/*.npy
-      syncs/*_sync.npz
-
-    Each sync file contains frame_idx / encoder_idx / pose_idx arrays.
+    Based off the real-world PushBlockImageDataset class
+    + MERLIN/train/dataset.py
     """
 
     def __init__(
@@ -300,6 +293,7 @@ def _load_video_rgb(video_path: str, out_hw: Tuple[int, int]) -> np.ndarray:
     cap.release()
 
     if not frames:
+        print("[MerlinImageDataSet] frames failed to load in _load_video_rgb(...)")
         return np.zeros((0, out_h, out_w, 3), dtype=np.uint8)
 
     return np.asarray(frames, dtype=np.uint8)

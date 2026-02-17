@@ -11,7 +11,7 @@ task_name: ${tasks.name}
 shape_meta: ${tasks.shape_meta}
 exp_name: "default"
 
-# Quick validation defaults; tune after inspecting dataset stats.
+# This should be changed?
 horizon: 16
 num_obs_steps: 1
 num_action_steps: 8

@@ -28,7 +28,7 @@ dataset:
   max_train_episodes: null
   num_obs_steps: ${dataset_obs_steps}
   num_latency_steps: ${num_latency_steps}
-  # Derived from scripts/merlin/inspect_merlin_data_stdlib.py on current copied dataset.
+  # From dataset.py in MERLIN
   first_cut: 0
-  encoder_window: 16
+  encoder_window: 8
   use_cache: False
