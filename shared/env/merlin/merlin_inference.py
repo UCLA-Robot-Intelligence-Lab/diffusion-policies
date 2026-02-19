@@ -9,6 +9,10 @@ import numpy as np
 import torch
 
 
+# # NOTE(raayan)
+# # This code was generated with the help of codex. That's why there is so much validation everywhere.
+
+
 class MerlinPolicyInference:
     """
     Lightweight MERLIN policy inference wrapper.
@@ -16,7 +20,6 @@ class MerlinPolicyInference:
     This class only handles model-side inference:
       image + robot_state -> action
     """
-
     def __init__(
         self,
         checkpoint_path: str,
@@ -25,6 +28,7 @@ class MerlinPolicyInference:
         num_inference_steps: Optional[int] = None,
         action_mode: str = "first",
     ):
+        # # We can get one action, an action chunk, or the full prediction.
         if action_mode not in {"first", "chunk", "all"}:
             raise ValueError(
                 f"Unsupported action_mode '{action_mode}'. Use one of: first, chunk, all."
@@ -42,6 +46,7 @@ class MerlinPolicyInference:
         workspace = workspace_cls(cfg)
         workspace.load_payload(payload, exclude_keys=None, include_keys=None)
 
+        # # Use EMA weights by default when available. This should always be the case.
         policy = workspace.model
         if use_ema and getattr(cfg.training, "use_ema", False):
             if workspace.ema_model is None:
@@ -68,6 +73,8 @@ class MerlinPolicyInference:
         self.action_dim = int(self.shape_meta["action"]["shape"][0])
         self.num_obs_steps = int(policy.num_obs_steps)
 
+        # # Rolling observation history for models expecting To > 1.
+        # # For MERLIN config today To=1 for now.
         self._img_history: Deque[np.ndarray] = deque(maxlen=self.num_obs_steps)
         self._state_history: Deque[np.ndarray] = deque(maxlen=self.num_obs_steps)
 
@@ -90,10 +97,17 @@ class MerlinPolicyInference:
         t0 = time.time()
         obs_torch = self._prepare_obs_torch(image=image, robot_state=robot_state)
         with torch.no_grad():
+            # # NOTE(raayan):
+            # # DiffusionUnetImagePolicy.predict_action() internally:
+            # # 1) normalizes obs with policy normalizer
+            # # 2) samples action trajectory in normalized space
+            # # 3) unnormalizes action back to real units before returning
             result = self.policy.predict_action(obs_torch)
         latency = time.time() - t0
 
+        # # result["action"] is already unnormalized and sliced to action chunk.
         action_chunk = result["action"][0].detach().to("cpu").numpy().astype(np.float32)
+        # # action_pred is full-horizon unnormalized prediction.
         action_pred = (
             result["action_pred"][0].detach().to("cpu").numpy().astype(np.float32)
         )
@@ -118,6 +132,7 @@ class MerlinPolicyInference:
 
     @staticmethod
     def _resolve_shape_meta(cfg) -> dict:
+        # # Different training configs in this repo may place shape_meta in slightly different paths.
         if hasattr(cfg, "shape_meta"):
             return cfg.shape_meta
         if hasattr(cfg, "tasks") and hasattr(cfg.tasks, "shape_meta"):
@@ -154,23 +169,29 @@ class MerlinPolicyInference:
                 f"Expected action shape [6] for MERLIN, got {shape_meta.get('action', {}).get('shape')}."
             )
 
-    def _prepare_obs_torch(self, image: np.ndarray, robot_state: np.ndarray) -> Dict[str, torch.Tensor]:
+    def _prepare_obs_torch(
+        self, image: np.ndarray, robot_state: np.ndarray
+    ) -> Dict[str, torch.Tensor]:
         img = self._prepare_image(image)
         state = self._prepare_state(robot_state)
 
         self._img_history.append(img)
         self._state_history.append(state)
 
+        # # Left-pad history with earliest frame/state until we have To items.
         while len(self._img_history) < self.num_obs_steps:
             self._img_history.appendleft(self._img_history[0].copy())
             self._state_history.appendleft(self._state_history[0].copy())
 
         img_stack = np.stack(list(self._img_history), axis=0)  # To, H, W, C
         img_stack = np.moveaxis(img_stack, -1, 1).astype(np.float32)  # To, C, H, W
-        state_stack = np.stack(list(self._state_history), axis=0).astype(np.float32)  # To, D
+        state_stack = np.stack(list(self._state_history), axis=0).astype(
+            np.float32
+        )  # To, D
 
         obs_np = {
-            self.rgb_key: img_stack[None],     # B, To, C, H, W
+            # Add batch dimension B=1 for single-step online inference.
+            self.rgb_key: img_stack[None],  # B, To, C, H, W
             self.state_key: state_stack[None],  # B, To, D
         }
 

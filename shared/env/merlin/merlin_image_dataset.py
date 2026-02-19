@@ -25,6 +25,10 @@ from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
 
 
+# # NOTE(raayan)
+# # This code was generated with the help of codex. That's why there is so much validation everywhere.
+
+
 def _resolve_merlin_root(dataset_path: str) -> str:
     """
     Accept either:
@@ -57,6 +61,19 @@ class MerlinImageDataset(Dataset):
     """
     Based off the real-world PushBlockImageDataset class
     + MERLIN/train/dataset.py
+
+    The onstructor builds from a Hydra config
+    (shape_meta, horizon, num_obs_steps, etc)
+    We expect a certain dataset disk layout. See _resolve_merlin_root.
+
+    We try to convert the dataset as collected into a replay-buffer style
+    dataset, which aligns with the rest of the repository.
+    See shared/utils/replay_buffer.py
+
+    NOTE(raayan): test different combos of seq_len
+    We use a sampler to get sequences of (horizon+num_latency_steps) and
+    generate valid indices. There is some padding if needed.
+    See shared/utils/sampler.py
     """
 
     def __init__(
@@ -81,6 +98,9 @@ class MerlinImageDataset(Dataset):
 
         replay_buffer = None
         if use_cache:
+            # # cache_key fingerprints shape + some other preprocessing (first_cut, encoder window from MERLIN)
+            # # fingerprint shape_meta exists since obs keys can change the already loaded data
+            # # assume cache path is <dataset_path>/merlin_<md5>.zarr.zip
             cache_key = {
                 "shape_meta": OmegaConf.to_container(shape_meta),
                 "first_cut": int(first_cut),
@@ -130,6 +150,8 @@ class MerlinImageDataset(Dataset):
                 store=zarr.MemoryStore(),
             )
 
+        # # we find obs keys by type in shape_meta
+        # # we expect 1 of each for use in _build_replay_buffer
         rgb_keys = []
         lowdim_keys = []
         obs_shape_meta = shape_meta["obs"]
@@ -142,11 +164,13 @@ class MerlinImageDataset(Dataset):
             else:
                 raise ValueError(f"Unsupported obs type '{data_type}' for key '{key}'")
 
+        # # for obs keys only, the sampler can load the first num_obs_steps instead of the full sequence
         key_first_k = {}
         if num_obs_steps is not None:
             for key in rgb_keys + lowdim_keys:
                 key_first_k[key] = num_obs_steps
 
+        # # we split by *episode*, not step
         val_mask = get_val_mask(
             n_episodes=replay_buffer.n_episodes,
             val_ratio=val_ratio,
@@ -159,6 +183,10 @@ class MerlinImageDataset(Dataset):
             seed=seed,
         )
 
+        # # reminder: see shared/utils/sampler.py
+        # # create a sampler over the remaining training episodes
+        # # the padding ensures that we have valid samples near episode boundaries
+        # # recall: seq_len = horizon + num_latency_steps
         sampler = SequenceSampler(
             replay_buffer=replay_buffer,
             sequence_length=horizon + num_latency_steps,
@@ -188,6 +216,7 @@ class MerlinImageDataset(Dataset):
         )
 
     def get_validation_dataset(self):
+        # # ReplayBuffer is shared and FileLock prevents concurrent writes
         val_set = copy.copy(self)
         val_set.sampler = SequenceSampler(
             replay_buffer=self.replay_buffer,
@@ -200,6 +229,13 @@ class MerlinImageDataset(Dataset):
         return val_set
 
     def get_normalizer(self, **kwargs) -> LinearNormalizer:
+        # # ref: shared/models/common/normalizer.py
+        # # from the original Diffusion Policy repository
+        # # a LinearNormalizer is a dict of SingleFieldLinearNormalizers that store:
+        # # scale, offset, and input stats (min/max/mean/std)
+        # # when _fit is called, stats are computed and features are re-mapped ([-1, 1])
+        # # this is so the model trains in normalized space and the optimization is smoother.
+        # # during inference, we unnormalize predicted actions to "real" action unit scales
         normalizer = LinearNormalizer()
 
         normalizer["action"] = SingleFieldLinearNormalizer.create_fit(
@@ -255,6 +291,7 @@ def _sorted_files(directory: str, suffix: str) -> List[str]:
 
 
 def _rolling_average(data: np.ndarray, window: int) -> np.ndarray:
+    # taken from MERLIN/training/dataset.py
     if window <= 0:
         return data.astype(np.float32)
 
