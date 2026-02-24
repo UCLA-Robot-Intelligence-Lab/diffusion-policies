@@ -8,7 +8,7 @@ opencv-python
 imageio
 imageio-ffmpeg
 h5py
-zarr
+zarr<3
 numcodecs
 hydra-core
 einops
