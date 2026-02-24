@@ -164,9 +164,9 @@ class MerlinPolicyInference:
             )
 
         action_shape = tuple(shape_meta.get("action", {}).get("shape", ()))
-        if action_shape != (6,):
+        if action_shape != (12,):
             raise ValueError(
-                f"Expected action shape [6] for MERLIN, got {shape_meta.get('action', {}).get('shape')}."
+                f"Expected action shape [12] for MERLIN, got {shape_meta.get('action', {}).get('shape')}."
             )
 
     def _prepare_obs_torch(

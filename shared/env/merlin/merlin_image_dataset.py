@@ -377,9 +377,9 @@ def _build_replay_buffer(
         )
 
     action_shape = tuple(shape_meta["action"]["shape"])
-    if action_shape != (6,):
+    if action_shape != (12,):
         raise ValueError(
-            f"Action shape must be [6] for MERLIN (arm deltas only), got {action_shape}"
+            f"Action shape must be [12] for MERLIN (6 arm + 6 encoder), got {action_shape}"
         )
 
     merlin_root = _resolve_merlin_root(dataset_path)
@@ -469,7 +469,7 @@ def _build_replay_buffer(
         episode = {
             rgb_key: episode_images.astype(np.uint8),
             lowdim_key: episode_state,
-            "action": episode_arm,
+            "action": episode_state,
         }
         replay_buffer.add_episode(episode)
 
