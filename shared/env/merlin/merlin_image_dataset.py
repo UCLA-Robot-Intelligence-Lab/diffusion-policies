@@ -37,7 +37,7 @@ def _resolve_merlin_root(dataset_path: str) -> str:
     """
     direct_candidates = [
         os.path.join(dataset_path, "camera"),
-        os.path.join(dataset_path, "processed_encoder_t"),
+        os.path.join(dataset_path, "encoder_delta_action_t"),
         os.path.join(dataset_path, "processed_action_t"),
         os.path.join(dataset_path, "syncs"),
     ]
@@ -47,7 +47,7 @@ def _resolve_merlin_root(dataset_path: str) -> str:
     nested_root = os.path.join(dataset_path, "data")
     nested_candidates = [
         os.path.join(nested_root, "camera"),
-        os.path.join(nested_root, "processed_encoder_t"),
+        os.path.join(nested_root, "encoder_delta_action_t"),
         os.path.join(nested_root, "processed_action_t"),
         os.path.join(nested_root, "syncs"),
     ]
@@ -385,7 +385,7 @@ def _build_replay_buffer(
     merlin_root = _resolve_merlin_root(dataset_path)
 
     video_dir = os.path.join(merlin_root, "camera", "mp4_files")
-    encoder_dir = os.path.join(merlin_root, "processed_encoder_t")
+    encoder_dir = os.path.join(merlin_root, "encoder_delta_action_t")
     action_dir = os.path.join(merlin_root, "processed_action_t")
     sync_dir = os.path.join(merlin_root, "syncs")
 

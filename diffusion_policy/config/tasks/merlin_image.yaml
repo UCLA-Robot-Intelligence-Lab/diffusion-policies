@@ -24,7 +24,7 @@ dataset:
   pad_before: ${eval:'${num_obs_steps}-1'}
   pad_after: ${eval:'${num_action_steps}-1'}
   seed: 42
-  val_ratio: 0.05
+  val_ratio: 0.2
   max_train_episodes: null
   num_obs_steps: ${dataset_obs_steps}
   num_latency_steps: ${num_latency_steps}

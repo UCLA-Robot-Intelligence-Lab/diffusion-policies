@@ -46,12 +46,12 @@ policy:
       pretrained: True
       output: cls
       proj_dim: null
-    resize_shape: [224, 224]
-    crop_shape: null
-    random_crop: False
-    use_group_norm: False
+    resize_shape: [224, 224] # Resnet uses [240, 320]
+    crop_shape: null # Resnet uses [216, 288]
+    random_crop: False # Resnet is true
+    use_group_norm: False # doesn't matter here
     share_vision_backbone: True
-    imagenet_norm: True
+    imagenet_norm: True # don't think this will do anything
 
   horizon: ${horizon}
   num_action_steps: ${eval:'${num_action_steps}+${num_latency_steps}'}
@@ -73,14 +73,14 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 32
+  batch_size: 256
   num_workers: 4
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 32
+  batch_size: 256
   num_workers: 4
   shuffle: False
   pin_memory: True
