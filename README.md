@@ -76,3 +76,17 @@ adding the shape as a suffix.
 	year={2023}
 }
 ```
+
+### DINOv2 ViT Backbone (Global Conditioning)
+You can train/infer with a task-agnostic ViT image encoder by using one of the new configs:
+```console
+python diffusion_policy/unet/train_unet_image_policy.py --config-name train_unet_image_policy_dinov2
+python diffusion_policy/unet/train_unet_image_policy.py --config-name train_unet_image_real_policy_dinov2
+```
+
+The DINOv2 integration keeps the same `DiffusionUnetImagePolicy` path used by ResNet:
+- `ObsEncoder` encodes each image frame into a latent (CLS by default).
+- Latents across observation history are flattened into `cond_BG` (global conditioning).
+- The same conditioning path is used for both training (`compute_loss`) and inference (`predict_action`).
+
+If you want strict image-only task-agnostic conditioning, keep only `type: rgb` entries in the task `shape_meta.obs`.
