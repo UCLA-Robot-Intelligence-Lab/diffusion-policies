@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torchvision
 
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional
 from shared.vision.common.crop_randomizer import CropRandomizer
 from shared.utils.pytorch_util import replace_submodules
 
@@ -19,6 +19,7 @@ class ObsEncoder(nn.Module):
         use_group_norm: bool = False,
         share_vision_backbone: bool = False,
         imagenet_norm: bool = False,
+        color_jitter: Optional[dict] = None,
     ):
         """
         args:
@@ -31,8 +32,8 @@ class ObsEncoder(nn.Module):
                               network module or a dictionary with loaded weights.
             resize_shape : For images, what to resize (down) the image to.
             crop_shape : Shape of the images after cropping.
-            random-crop : Flag to determine to use the crop_randomizer instead of
-                          default center crop.
+            random_crop : Flag to determine whether to use random crop instead
+                          of center crop when crop_shape is provided.
             use_group_norm : Flag to determine whether to replace 2D Batch Norm
                              for resnet backbones with Group Norm.
             share_vision_backbone : Flag to determine whether to use the same
@@ -40,6 +41,9 @@ class ObsEncoder(nn.Module):
                                     observations) or multple.
             imagenet_norm : Flag to determine whether to renormalize image with
                             imagenet normalization. Assumes input is in [0, 1]
+            color_jitter : Optional color jitter settings. Supports either:
+                           - global dict with keys brightness/contrast/saturation/hue/p
+                           - per-key dict where value for each rgb key is that dict
         """
         super().__init__()
 
@@ -91,15 +95,15 @@ class ObsEncoder(nn.Module):
                     this_resizer = torchvision.transforms.Resize(size=(h, w))
                     input_shape = (shape[0], h, w)
 
-                # Setup crop randomizer.
-                this_randomizer = nn.Identity()
+                # Setup crop transform.
+                this_crop = nn.Identity()
                 if crop_shape is not None:
                     if isinstance(crop_shape, dict):
                         h, w = crop_shape[key]
                     else:
                         h, w = crop_shape
                     if random_crop:
-                        this_randomizer = CropRandomizer(
+                        this_crop = CropRandomizer(
                             input_shape=input_shape,
                             crop_height=h,
                             crop_width=w,
@@ -107,7 +111,35 @@ class ObsEncoder(nn.Module):
                             pos_enc=False,
                         )
                     else:
-                        this_normalizer = torchvision.transforms.CenterCrop(size=(h, w))
+                        this_crop = torchvision.transforms.CenterCrop(size=(h, w))
+
+                # Optional color jitter augmentation.
+                this_color_aug = nn.Identity()
+                this_jitter_cfg = None
+                if color_jitter is not None:
+                    # Allow either global jitter config or per-rgb-key config.
+                    if (
+                        isinstance(color_jitter, dict)
+                        and key in color_jitter
+                        and isinstance(color_jitter[key], dict)
+                    ):
+                        this_jitter_cfg = color_jitter[key]
+                    else:
+                        this_jitter_cfg = color_jitter
+
+                if this_jitter_cfg is not None:
+                    jitter_cfg = dict(this_jitter_cfg)
+                    jitter_p = float(jitter_cfg.pop("p", 1.0))
+                    if len(jitter_cfg) > 0:
+                        jitter_tf = torchvision.transforms.ColorJitter(**jitter_cfg)
+                        if jitter_p < 1.0:
+                            this_color_aug = torchvision.transforms.RandomApply(
+                                [jitter_tf], p=jitter_p
+                            )
+                        else:
+                            this_color_aug = jitter_tf
+
+                # Optional imagenet normalization.
                 this_normalizer = nn.Identity()
                 if imagenet_norm:
                     this_normalizer = torchvision.transforms.Normalize(
@@ -115,7 +147,10 @@ class ObsEncoder(nn.Module):
                     )
 
                 this_transform = nn.Sequential(
-                    this_resizer, this_randomizer, this_normalizer
+                    this_resizer,
+                    this_crop,
+                    this_color_aug,
+                    this_normalizer,
                 )
                 key_transform_map[key] = this_transform
             elif type == "low_dim":

@@ -46,10 +46,16 @@ policy:
       pretrained: True
       output: cls
       proj_dim: null
-    resize_shape: [224, 224] # Resnet uses [240, 320]
-    crop_shape: null # Resnet uses [216, 288]
-    random_crop: False # Resnet is true
-    use_group_norm: False # doesn't matter here
+    resize_shape: [240, 240]
+    crop_shape: [224, 224]
+    random_crop: True
+    color_jitter:
+      brightness: 0.64
+      contrast: 0.32
+      saturation: 0.32
+      hue: 0.08
+      p: 0.8
+    use_group_norm: False
     share_vision_backbone: True
     imagenet_norm: True # don't think this will do anything
 

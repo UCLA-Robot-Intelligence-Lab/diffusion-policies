@@ -57,7 +57,8 @@ change the device, and config accordingly. You can also override the Hydra confi
 ### Credit
 The implementations here are not necessarily original. Please reference the original repositories (linked below) literature (cited at the bottom)!
 - [Diffusion Policy](https://github.com/real-stanford/diffusion_policy): see the `README.md` under `diffusion_policy/` for more details on the practical implementation in this repository.
-- [Vision in Action](vision-in-action.github.io): ViT backbone
+- [Vision in Action](vision-in-action.github.io): ViT backbone (MERLIN)
+- [DexUMI](https://dex-umi.github.io/): ViT backbone, image transforms (MERLIN)
 
 ### Shape Suffixes and Dimension  Key
 This repository annotates tensors with shape suffixes, which simply indicate what you would expect to receive after calling `.shape` on the tensor. To read about why, see [this blog post](https://medium.com/@NoamShazeer/shape-suffixes-good-coding-style-f836e72e24fd) from Noam Shazeer. In this repository, we use the following dimension key:
@@ -109,6 +110,15 @@ adding the shape as a suffix.
       archivePrefix={arXiv},
       primaryClass={cs.RO},
       url={https://arxiv.org/abs/2506.15666}, 
+}
+@misc{xu2025dexumiusinghumanhand,
+      title={DexUMI: Using Human Hand as the Universal Manipulation Interface for Dexterous Manipulation}, 
+      author={Mengda Xu and Han Zhang and Yifan Hou and Zhenjia Xu and Linxi Fan and Manuela Veloso and Shuran Song},
+      year={2025},
+      eprint={2505.21864},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2505.21864}, 
 }
 ```
 
