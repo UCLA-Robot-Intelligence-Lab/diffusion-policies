@@ -28,10 +28,37 @@ training script, for example
 ```console
 python train_unet_image_policy.py
 ```
+## Training
+To train, first create the environment:
+```console
+uv venv
+```
+and activate it:
+```console
+source .venv/bin/activate
+```
+then install requirements:
+```console
+uv pip install -r requirements-train.txt
+```
+make sure wandb is enabled:
+```console
+wandb login
+```
+you can try to train with the following command, for example:
+```console
+CUDA_VISIBLE_DEVICES=1 \
+python diffusion_policy/unet/train_unet_image_policy.py \
+  --config-name=train_unet_image_merlin_policy \
+  logging.mode=online
+```
+change the device, and config accordingly. You can also override the Hydra config with specific parameters by adding more arguments (e.g. `logging.mode=online` here).
 
 ### Credit
 The implementations here are not necessarily original. Please reference the original repositories (linked below) literature (cited at the bottom)!
 - [Diffusion Policy](https://github.com/real-stanford/diffusion_policy): see the `README.md` under `diffusion_policy/` for more details on the practical implementation in this repository.
+- [Vision in Action](vision-in-action.github.io): ViT backbone (MERLIN)
+- [DexUMI](https://dex-umi.github.io/): ViT backbone, image transforms (MERLIN)
 
 ### Shape Suffixes and Dimension  Key
 This repository annotates tensors with shape suffixes, which simply indicate what you would expect to receive after calling `.shape` on the tensor. To read about why, see [this blog post](https://medium.com/@NoamShazeer/shape-suffixes-good-coding-style-f836e72e24fd) from Noam Shazeer. In this repository, we use the following dimension key:
@@ -75,4 +102,23 @@ adding the shape as a suffix.
 	booktitle={Proceedings of Robotics: Science and Systems (RSS)},
 	year={2023}
 }
+@misc{xiong2025visionactionlearningactive,
+      title={Vision in Action: Learning Active Perception from Human Demonstrations}, 
+      author={Haoyu Xiong and Xiaomeng Xu and Jimmy Wu and Yifan Hou and Jeannette Bohg and Shuran Song},
+      year={2025},
+      eprint={2506.15666},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2506.15666}, 
+}
+@misc{xu2025dexumiusinghumanhand,
+      title={DexUMI: Using Human Hand as the Universal Manipulation Interface for Dexterous Manipulation}, 
+      author={Mengda Xu and Han Zhang and Yifan Hou and Zhenjia Xu and Linxi Fan and Manuela Veloso and Shuran Song},
+      year={2025},
+      eprint={2505.21864},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2505.21864}, 
+}
 ```
+
