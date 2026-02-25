@@ -11,15 +11,16 @@ import torch
 from shared.env.merlin.se3_utils import relative_to_absolute
 
 
+# # NOTE(raayan)
+# # This code was generated with the help of Codex and Opus. Blame the overwhelming validation on Codex.
+
+
 class MerlinPolicyInference:
     """
     Lightweight MERLIN policy inference wrapper.
-
-    The model is conditioned on image only and predicts *relative* actions.
-    robot_state is used externally to convert relative predictions back to
-    absolute commands, but is NOT fed to the model.
-
-      image -> model -> relative actions -> + current state -> absolute actions
+    
+    Currently:
+    image -> model -> relative actions -> + current state -> absolute actions
     """
     def __init__(
         self,
@@ -82,12 +83,15 @@ class MerlinPolicyInference:
         Run one inference step.
 
         Args:
-            image: RGB image in HWC format. Fed to the model as conditioning.
+            image: RGB image in HWC format. Used as conditioning.
             robot_state: 1D state array with shape (12,) for MERLIN.
-                         NOT fed to the model — only used to convert the
-                         predicted relative actions back to absolute.
+                         Used to convert the predicted relative 
+                         actions back to absolute.
         Returns:
             Dict with absolute action outputs and metadata.
+            NOTE: the model is expected to predict *relative* outputs.
+                  We convert them to absolute outputs using current robot state
+                  which is passed into the prediction.
         """
         if not isinstance(robot_state, np.ndarray):
             robot_state = np.asarray(robot_state, dtype=np.float32)
@@ -99,15 +103,61 @@ class MerlinPolicyInference:
 
         t0 = time.time()
         obs_torch = self._prepare_obs_torch(image=image)
+
+        # # NOTE(raayan)
+        # # We are using *just* the image observation in order to do prediction.
+        # # I decided to walk through what was happening just for my understanding.
+        # # In model code, this works as follows:
+        # # 1. self.policy_predict_action(obs_torch) will normalized the data, which is just the image.
+        # #    normalized_obs = normalizer.normalize(obs) 
+        # #    | unet_image_policy::259
+        # # 2. since global_obs_cond=True, we flatten and encode the image into a global conditioning vector
+        # #    cond_BG = normalized_obs_feats = obs_encoder(flat_normalized_obs = dict_apply(normalized_obs ... ))
+        # #    | unet_image_policy::266-278
+        # # 3. ObsEncoder.forward() will only collect visual features because it skips low_dim_keys
+        # #    | multi_image_obs_encoder::181-233
+        # # 4. Our mask becomes only false
+        # #    cond_mask_BTF = torch.zeros_like(cond_data_BTF = torch.zeros(size=(B, T, Fa), ...), dtype=torch.bool)
+        # #    | unet_image_policy::277-278
+        # # 5. For our sampling, the sample we create looks like this:
+        # #    sample_BTF = self.conditional_sample(
+        # #        cond_data_BTF=cond_data_BTF,  # zeros [1, 16, 12]
+        # #        cond_mask_BTF=cond_mask_BTF,  # all False [1, 16, 12]
+        # #        cond_BTL=None,
+        # #        cond_BG=cond_BG,              # image features [1, Fo]
+        # #    )
+        # #    | unet_image_policy::299-305
+        # # 6. When we actually do our denoising, at each step, we assume we have completely unknown action trajectory
+        # #    trajectory_BTF[cond_mask_BTF] = cond_data_BTF[cond_mask_BTF] # Since it all false, we don't overwrite at all
+        # #    | unet_image_policy::214
+        # # 7. The model forward pass gets our noised trajectory, and the only global condition (cond_BG) are the image features
+        # #    denoised_trajectory_BTF = model(
+        # #        sample_BTF=trajectory_BTF, # Current *noisy* trajectory at timestep t
+        # #        timesteps_B=t, # Embedded in ConditionalUnet1d as timestep conditioning
+        # #        cond_BTL=cond_BTL, # No temporal conditioning. This will be None.
+        # #        cond_BG=cond_BG, # This is our image features
+        # #    )
+        # #    | unet_image_policy::217-222
+        # # 8. Complete all scheduler steps and get a denoised trajectory of *relative* actions in *normalized* space
+        # #    | unet_image_policy::225-231
+        # # 9. Unnormalize from [-1, 1] to real relative action units
+        # #    | unet_image_policy::307-313
+        # # 0. Return result here.
+
         with torch.no_grad():
+            # # NOTE(raayan)
+            # # DiffusionUnetImagePolicy.predict_action(...) internally
+            # # 1. normalizes obs with normalizer
+            # # 2. samples action trajectory in normalized space
+            # # 3. unnormalizes action back to real units before returning
             result = self.policy.predict_action(obs_torch)
         latency = time.time() - t0
 
-        # Model outputs are unnormalized *relative* actions.
+        # # Model outputs are unnormalized *relative* actions.
         rel_action_chunk = result["action"][0].detach().cpu().numpy().astype(np.float32)
         rel_action_pred = result["action_pred"][0].detach().cpu().numpy().astype(np.float32)
 
-        # Convert relative -> absolute using current robot state.
+        # # Convert relative -> absolute using current robot state.
         action_chunk = relative_to_absolute(rel_action_chunk, robot_state)
         action_pred = relative_to_absolute(rel_action_pred, robot_state)
 

@@ -27,7 +27,7 @@ from shared.env.merlin.se3_utils import absolute_to_relative
 
 
 # # NOTE(raayan)
-# # This code was generated with the help of codex. That's why there is so much validation everywhere.
+# # This code was generated with the help of Codex. That's why there is so much validation everywhere.
 
 
 def _resolve_merlin_root(dataset_path: str) -> str:
@@ -63,7 +63,7 @@ class MerlinImageDataset(Dataset):
     Based off the real-world PushBlockImageDataset class
     + MERLIN/train/dataset.py
 
-    The onstructor builds from a Hydra config
+    The constructor builds from a Hydra config
     (shape_meta, horizon, num_obs_steps, etc)
     We expect a certain dataset disk layout. See _resolve_merlin_root.
 
@@ -237,11 +237,28 @@ class MerlinImageDataset(Dataset):
         # # when _fit is called, stats are computed and features are re-mapped ([-1, 1])
         # # this is so the model trains in normalized space and the optimization is smoother.
         # # during inference, we unnormalize predicted actions to "real" action unit scales
+
         normalizer = LinearNormalizer()
 
-        # Action normalizer is computed on *relative* actions, not the absolute
-        # values stored in the replay buffer. We iterate through all sample
-        # windows, compute relative actions for each, and collect stats.
+        # # In DexUMI, they are normalizing using precomputed stats straight at dataloader runtime (relative)
+        # # When we build our dataset in training:
+        # #
+        # #      dataset = hydra.utils.instantiate(cfg.tasks.dataset)
+        # #      train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        # #      normalizer = dataset.get_normalizer()
+        # #
+        # #      self.model.set_normalizer(normalizer)
+        # #
+        # # We are computing stats on relative actions, using sampled windows from our sampler.
+        # # These sliding windows are converted to relative, and then normalized.
+        # # SingleFieldLinearNormalizer computes per dimension, this should be ~equivalent.
+        # #
+        # # NOTE(raayan)
+        # # Opus wrote this part of the code. I think this seems reasonable. DexUMI is normalizing in
+        # # relative action space. They have their own normalization scheme based on dataset stats but
+        # # the function is very similar. We do this in get_normalizer() because it integrates directly
+        # # with the training code.
+
         print("[MerlinImageDataset] Computing relative action normalization stats...")
         all_relative = []
         for idx in range(len(self.sampler)):
@@ -252,7 +269,6 @@ class MerlinImageDataset(Dataset):
             relative = absolute_to_relative(abs_action)
             all_relative.append(relative)
         all_relative = np.concatenate(all_relative, axis=0)
-        print(f"[MerlinImageDataset] Relative action stats shape: {all_relative.shape}")
         normalizer["action"] = SingleFieldLinearNormalizer.create_fit(all_relative)
 
         for key in self.lowdim_keys:
@@ -287,10 +303,13 @@ class MerlinImageDataset(Dataset):
             obs_dict[key] = data[key][obs_t_slice].astype(np.float32)
             del data[key]
 
-        # Convert absolute actions to relative:
-        # arm (first 6D) via SE(3), hand (last 6D) via subtraction
+        # # Convert absolute actions to relative:
+        # # arm (first 6D) via SE(3), hand (last 6D) via subtraction
         abs_action = data["action"].astype(np.float32)
+        # # We should never be hitting this case in MERLIN actually
         if self.num_latency_steps > 0:
+            # # Log if we hit this case.
+            print(f"[MerlinImageDataset] hit self.num_latency_steps > 0; l296")
             abs_action = abs_action[self.num_latency_steps:]
         action = absolute_to_relative(abs_action)
 
@@ -308,7 +327,7 @@ def _sorted_files(directory: str, suffix: str) -> List[str]:
 
 
 def _rolling_average(data: np.ndarray, window: int) -> np.ndarray:
-    # taken from MERLIN/training/dataset.py
+    # # taken from MERLIN/training/dataset.py
     if window <= 0:
         return data.astype(np.float32)
 
