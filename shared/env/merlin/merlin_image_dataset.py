@@ -276,7 +276,7 @@ class MerlinImageDataset(Dataset):
                 self.replay_buffer[key]
             )
         for key in self.rgb_keys:
-            normalizer[key] = get_image_range_normalizer()
+            normalizer[key] = SingleFieldLinearNormalizer.create_identity()
 
         return normalizer
 
