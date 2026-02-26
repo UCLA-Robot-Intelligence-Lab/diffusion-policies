@@ -6,9 +6,6 @@ shape_meta: &shape_meta
     camera_0:
       shape: *image_shape
       type: rgb
-    robot_state:
-      shape: [12]
-      type: low_dim
   action:
     shape: [12]
 

@@ -23,10 +23,11 @@ from shared.utils.normalize_util import get_image_range_normalizer
 from shared.utils.pytorch_util import dict_apply
 from shared.utils.replay_buffer import ReplayBuffer
 from shared.utils.sampler import SequenceSampler, get_val_mask, downsample_mask
+from shared.env.merlin.se3_utils import absolute_to_relative
 
 
 # # NOTE(raayan)
-# # This code was generated with the help of codex. That's why there is so much validation everywhere.
+# # This code was generated with the help of Codex. That's why there is so much validation everywhere.
 
 
 def _resolve_merlin_root(dataset_path: str) -> str:
@@ -37,8 +38,8 @@ def _resolve_merlin_root(dataset_path: str) -> str:
     """
     direct_candidates = [
         os.path.join(dataset_path, "camera"),
-        os.path.join(dataset_path, "encoder_delta_action_t"),
-        os.path.join(dataset_path, "processed_action_t"),
+        os.path.join(dataset_path, "processed_encoder_t"),
+        os.path.join(dataset_path, "absolute_action_t"),
         os.path.join(dataset_path, "syncs"),
     ]
     if all(os.path.isdir(p) for p in direct_candidates):
@@ -47,8 +48,8 @@ def _resolve_merlin_root(dataset_path: str) -> str:
     nested_root = os.path.join(dataset_path, "data")
     nested_candidates = [
         os.path.join(nested_root, "camera"),
-        os.path.join(nested_root, "encoder_delta_action_t"),
-        os.path.join(nested_root, "processed_action_t"),
+        os.path.join(nested_root, "processed_encoder_t"),
+        os.path.join(nested_root, "absolute_action_t"),
         os.path.join(nested_root, "syncs"),
     ]
     if all(os.path.isdir(p) for p in nested_candidates):
@@ -62,7 +63,7 @@ class MerlinImageDataset(Dataset):
     Based off the real-world PushBlockImageDataset class
     + MERLIN/train/dataset.py
 
-    The onstructor builds from a Hydra config
+    The constructor builds from a Hydra config
     (shape_meta, horizon, num_obs_steps, etc)
     We expect a certain dataset disk layout. See _resolve_merlin_root.
 
@@ -167,7 +168,7 @@ class MerlinImageDataset(Dataset):
         # # for obs keys only, the sampler can load the first num_obs_steps instead of the full sequence
         key_first_k = {}
         if num_obs_steps is not None:
-            for key in rgb_keys + lowdim_keys:
+            for key in rgb_keys:
                 key_first_k[key] = num_obs_steps
 
         # # we split by *episode*, not step
@@ -236,11 +237,40 @@ class MerlinImageDataset(Dataset):
         # # when _fit is called, stats are computed and features are re-mapped ([-1, 1])
         # # this is so the model trains in normalized space and the optimization is smoother.
         # # during inference, we unnormalize predicted actions to "real" action unit scales
+
         normalizer = LinearNormalizer()
 
-        normalizer["action"] = SingleFieldLinearNormalizer.create_fit(
-            self.replay_buffer["action"]
-        )
+        # # In DexUMI, they are normalizing using precomputed stats straight at dataloader runtime (relative)
+        # # When we build our dataset in training:
+        # #
+        # #      dataset = hydra.utils.instantiate(cfg.tasks.dataset)
+        # #      train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        # #      normalizer = dataset.get_normalizer()
+        # #
+        # #      self.model.set_normalizer(normalizer)
+        # #
+        # # We are computing stats on relative actions, using sampled windows from our sampler.
+        # # These sliding windows are converted to relative, and then normalized.
+        # # SingleFieldLinearNormalizer computes per dimension, this should be ~equivalent.
+        # #
+        # # NOTE(raayan)
+        # # Opus wrote this part of the code. I think this seems reasonable. DexUMI is normalizing in
+        # # relative action space. They have their own normalization scheme based on dataset stats but
+        # # the function is very similar. We do this in get_normalizer() because it integrates directly
+        # # with the training code.
+
+        print("[MerlinImageDataset] Computing relative action normalization stats...")
+        all_relative = []
+        for idx in range(len(self.sampler)):
+            data = self.sampler.sample_sequence(idx)
+            abs_action = data["action"].astype(np.float32)
+            if self.num_latency_steps > 0:
+                abs_action = abs_action[self.num_latency_steps:]
+            relative = absolute_to_relative(abs_action)
+            all_relative.append(relative)
+        all_relative = np.concatenate(all_relative, axis=0)
+        normalizer["action"] = SingleFieldLinearNormalizer.create_fit(all_relative)
+
         for key in self.lowdim_keys:
             normalizer[key] = SingleFieldLinearNormalizer.create_fit(
                 self.replay_buffer[key]
@@ -273,9 +303,15 @@ class MerlinImageDataset(Dataset):
             obs_dict[key] = data[key][obs_t_slice].astype(np.float32)
             del data[key]
 
-        action = data["action"].astype(np.float32)
+        # # Convert absolute actions to relative:
+        # # arm (first 6D) via SE(3), hand (last 6D) via subtraction
+        abs_action = data["action"].astype(np.float32)
+        # # We should never be hitting this case in MERLIN actually
         if self.num_latency_steps > 0:
-            action = action[self.num_latency_steps :]
+            # # Log if we hit this case.
+            print(f"[MerlinImageDataset] hit self.num_latency_steps > 0; l296")
+            abs_action = abs_action[self.num_latency_steps:]
+        action = absolute_to_relative(abs_action)
 
         torch_data = {
             "obs": dict_apply(obs_dict, torch.from_numpy),
@@ -291,7 +327,7 @@ def _sorted_files(directory: str, suffix: str) -> List[str]:
 
 
 def _rolling_average(data: np.ndarray, window: int) -> np.ndarray:
-    # taken from MERLIN/training/dataset.py
+    # # taken from MERLIN/training/dataset.py
     if window <= 0:
         return data.astype(np.float32)
 
@@ -346,22 +382,13 @@ def _build_replay_buffer(
     obs_shape_meta = shape_meta["obs"]
 
     rgb_keys = [k for k, v in obs_shape_meta.items() if v.get("type", "low_dim") == "rgb"]
-    lowdim_keys = [
-        k for k, v in obs_shape_meta.items() if v.get("type", "low_dim") == "low_dim"
-    ]
 
     if len(rgb_keys) != 1:
         raise ValueError(
             f"MerlinImageDataset expects exactly 1 RGB obs key, got {len(rgb_keys)}"
         )
-    if len(lowdim_keys) != 1:
-        raise ValueError(
-            "MerlinImageDataset expects exactly 1 low-dim obs key "
-            f"(state vector), got {len(lowdim_keys)}"
-        )
 
     rgb_key = rgb_keys[0]
-    lowdim_key = lowdim_keys[0]
 
     rgb_shape = tuple(obs_shape_meta[rgb_key]["shape"])
     if len(rgb_shape) != 3 or rgb_shape[0] != 3:
@@ -369,12 +396,6 @@ def _build_replay_buffer(
             f"RGB obs shape must be [3, H, W], got {rgb_shape} for key '{rgb_key}'"
         )
     out_h, out_w = rgb_shape[1], rgb_shape[2]
-
-    lowdim_shape = tuple(obs_shape_meta[lowdim_key]["shape"])
-    if lowdim_shape != (12,):
-        raise ValueError(
-            f"Low-dim obs shape must be [12] for MERLIN (6 arm + 6 encoder), got {lowdim_shape}"
-        )
 
     action_shape = tuple(shape_meta["action"]["shape"])
     if action_shape != (12,):
@@ -385,8 +406,8 @@ def _build_replay_buffer(
     merlin_root = _resolve_merlin_root(dataset_path)
 
     video_dir = os.path.join(merlin_root, "camera", "mp4_files")
-    encoder_dir = os.path.join(merlin_root, "encoder_delta_action_t")
-    action_dir = os.path.join(merlin_root, "processed_action_t")
+    encoder_dir = os.path.join(merlin_root, "processed_encoder_t")
+    action_dir = os.path.join(merlin_root, "absolute_action_t")
     sync_dir = os.path.join(merlin_root, "syncs")
 
     for required_dir in [video_dir, encoder_dir, action_dir, sync_dir]:
@@ -468,7 +489,6 @@ def _build_replay_buffer(
 
         episode = {
             rgb_key: episode_images.astype(np.uint8),
-            lowdim_key: episode_state,
             "action": episode_state,
         }
         replay_buffer.add_episode(episode)
