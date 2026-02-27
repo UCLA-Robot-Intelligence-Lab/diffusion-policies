@@ -168,7 +168,7 @@ class MerlinImageDataset(Dataset):
         # # for obs keys only, the sampler can load the first num_obs_steps instead of the full sequence
         key_first_k = {}
         if num_obs_steps is not None:
-            for key in rgb_keys:
+            for key in rgb_keys + lowdim_keys:
                 key_first_k[key] = num_obs_steps
 
         # # we split by *episode*, not step
@@ -300,7 +300,13 @@ class MerlinImageDataset(Dataset):
             del data[key]
 
         for key in self.lowdim_keys:
-            obs_dict[key] = data[key][obs_t_slice].astype(np.float32)
+            lowdim_obs = data[key][obs_t_slice].astype(np.float32)
+            # Current-step-only hand conditioning: repeat latest absolute pose.
+            if key == "hand_pose_abs" and lowdim_obs.shape[0] > 0:
+                lowdim_obs = np.repeat(
+                    lowdim_obs[[-1]], repeats=lowdim_obs.shape[0], axis=0
+                )
+            obs_dict[key] = lowdim_obs
             del data[key]
 
         # # Convert absolute actions to relative:
@@ -381,7 +387,12 @@ def _build_replay_buffer(
 ) -> ReplayBuffer:
     obs_shape_meta = shape_meta["obs"]
 
-    rgb_keys = [k for k, v in obs_shape_meta.items() if v.get("type", "low_dim") == "rgb"]
+    rgb_keys = [
+        k for k, v in obs_shape_meta.items() if v.get("type", "low_dim") == "rgb"
+    ]
+    lowdim_keys = [
+        k for k, v in obs_shape_meta.items() if v.get("type", "low_dim") == "low_dim"
+    ]
 
     if len(rgb_keys) != 1:
         raise ValueError(
@@ -396,6 +407,19 @@ def _build_replay_buffer(
             f"RGB obs shape must be [3, H, W], got {rgb_shape} for key '{rgb_key}'"
         )
     out_h, out_w = rgb_shape[1], rgb_shape[2]
+
+    for key in lowdim_keys:
+        shape = tuple(obs_shape_meta[key].get("shape", ()))
+        if key == "hand_pose_abs":
+            if shape != (6,):
+                raise ValueError(
+                    f"Low-dim obs '{key}' must have shape [6], got {shape}"
+                )
+        else:
+            raise ValueError(
+                f"Unsupported low-dim obs key '{key}' for MERLIN dataset conversion. "
+                "Supported keys: hand_pose_abs."
+            )
 
     action_shape = tuple(shape_meta["action"]["shape"])
     if action_shape != (12,):
@@ -491,6 +515,8 @@ def _build_replay_buffer(
             rgb_key: episode_images.astype(np.uint8),
             "action": episode_state,
         }
+        if "hand_pose_abs" in lowdim_keys:
+            episode["hand_pose_abs"] = episode_hand.astype(np.float32)
         replay_buffer.add_episode(episode)
 
         kept_episodes += 1
