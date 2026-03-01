@@ -70,6 +70,9 @@ class MerlinPolicyInference:
         self.expected_chw = tuple(self.shape_meta["obs"][self.rgb_key]["shape"])
         self.action_dim = int(self.shape_meta["action"]["shape"][0])
         self.num_obs_steps = int(policy.num_obs_steps)
+        self.hand_pose_key = (
+            "hand_pose_abs" if "hand_pose_abs" in self.shape_meta["obs"] else None
+        )
 
         self._img_history: Deque[np.ndarray] = deque(maxlen=self.num_obs_steps)
 
@@ -102,7 +105,7 @@ class MerlinPolicyInference:
             )
 
         t0 = time.time()
-        obs_torch = self._prepare_obs_torch(image=image)
+        obs_torch = self._prepare_obs_torch(image=image, robot_state=robot_state)
 
         # # NOTE(raayan)
         # # We are using *just* the image observation in order to do prediction.
@@ -209,7 +212,19 @@ class MerlinPolicyInference:
                 f"Expected action shape [12] for MERLIN, got {shape_meta.get('action', {}).get('shape')}."
             )
 
-    def _prepare_obs_torch(self, image: np.ndarray) -> Dict[str, torch.Tensor]:
+        if "hand_pose_abs" in obs_meta:
+            hand_meta = obs_meta["hand_pose_abs"]
+            hand_shape = tuple(hand_meta.get("shape", ()))
+            hand_type = hand_meta.get("type", "low_dim")
+            if hand_type != "low_dim" or hand_shape != (6,):
+                raise ValueError(
+                    "Expected hand_pose_abs to be low_dim with shape [6], "
+                    f"got type={hand_type}, shape={hand_meta.get('shape')}."
+                )
+
+    def _prepare_obs_torch(
+        self, image: np.ndarray, robot_state: np.ndarray
+    ) -> Dict[str, torch.Tensor]:
         img = self._prepare_image(image)
         self._img_history.append(img)
 
@@ -222,6 +237,12 @@ class MerlinPolicyInference:
         obs_np = {
             self.rgb_key: img_stack[None],  # B, To, C, H, W
         }
+        if self.hand_pose_key is not None:
+            hand_pose = robot_state[6:12].astype(np.float32)
+            hand_pose_hist = np.repeat(
+                hand_pose[None], repeats=self.num_obs_steps, axis=0
+            )
+            obs_np[self.hand_pose_key] = hand_pose_hist[None]  # B, To, 6
 
         obs_torch = {
             k: torch.from_numpy(v).to(self.device, non_blocking=True)
